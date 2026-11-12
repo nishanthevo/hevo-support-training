@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "apps.media_pipeline",
     "apps.bot_sim",
     "apps.manual_sim",
+    "apps.enrollment",
 ]
 
 MIDDLEWARE = [

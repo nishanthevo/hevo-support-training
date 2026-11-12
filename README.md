@@ -9,9 +9,10 @@ It replaces a spreadsheet-and-Google-Forms process (the design is in [docs/archi
 * **Docs** — design and per-module notes (`docs/`).
 
 > Status: V1 in progress. Built and tested: authoring (Studio), learner experience with ordered
-> courses, quizzes, tracked video, AI practice tickets, mentor-rated simulations, and the Admin Console.
-> **Not built yet:** course enrollment (every learner currently sees every published course), the weighted
-> score rollup, certificates, and the Admin dashboard (a placeholder). See [What's built](#whats-built).
+> courses, quizzes, tracked video, AI practice tickets, mentor-rated simulations, **enrollment** (who is
+> on which course and version, mentors, programs), and the Admin Console.
+> **Not built yet:** the weighted score rollup, certificates, and the Admin dashboard (a placeholder).
+> See [What's built](#whats-built).
 
 ---
 
@@ -92,14 +93,23 @@ need Postgres and skip themselves otherwise.
 
 The app has three areas, chosen by your role. The top bar shows the ones you may use.
 
-### Learners — `/`
-* **My courses** lists the published courses; open one for its overview and a path of modules and lessons.
+### Learners — `/` and `/progress`
+* **My courses** lists the courses you are **enrolled** on (if there are none, ask your trainer); open one
+  for its overview and a path of modules and lessons. You stay on the version you were enrolled on until a
+  trainer moves you to a newer one.
+* **My progress** (`/progress`) is your own report across your courses: lessons done of total and what is
+  next; each quiz with its attempts, best and latest score (or "awaiting review" while written answers are
+  being marked); practice tickets (count, average out of 5, the last few); and mentor-rated work with its
+  score out of 5 and the mentor's feedback. Facts only: no overall score, grade or ranking (those wait for
+  the scoring rules, see [docs/scoring-open-questions.md](docs/scoring-open-questions.md)).
 * In a lesson, work through its activities, then press **Mark complete**. In an *ordered* course a lesson
   stays locked ("Unlocks when you complete …") until the one before it is complete.
 * **Activities:**
   * *Reading / link* — open it, then mark done.
   * *Video* — watched in place; credit is based on what you actually watched.
-  * *Quiz* — scored on the server, with attempt limits and a pass mark.
+  * *Quiz* — scored on the server, with attempt limits and a pass mark. A quiz can mix single-choice,
+    multiple-choice and **written** questions: choice questions score at once, written answers are marked
+    by a mentor or trainer (the quiz shows "awaiting review" until then, and the next lesson stays open).
   * *Practice ticket* — a simulated customer conversation scored on communication, empathy, accuracy and
     concreteness; scored out of 5, never a percentage.
   * *Simulation (mentor-rated)* — hand in a written answer (and screenshots/PDF); a mentor rates it against a
@@ -122,10 +132,12 @@ For Trainers, Mentors and Admins (each sees only what their role allows). The le
 | Results | Dashboard | placeholder (design pending) |
 | | Learners | per-learner progress, attempts, practice transcripts, mentor-rated work; CSV export |
 | | Quizzes | per-quiz results; reset a learner's attempts |
-| Review | Ratings | the mentor queue (**Mine**, **Shared pool**, **All waiting**, **Needs a trainer**); open a submission, score the rubric, send feedback; trainers/admins extend deadlines, waive, close, reopen, reassign |
+| Review | Ratings | the mentor queue (**Mine**, **Shared pool**, **All waiting**, **Needs a trainer**) of simulation hand-ins and **written quiz answers**; open one, score the rubric or give marks per written question, send feedback; trainers/admins extend deadlines, waive, close, reopen, reassign |
 | Content | Courses | every course and version, archive/restore (authoring itself is in Studio) |
 | | Practice scenarios | the question bank for practice tickets: approve, edit, import past customer queries |
 | People | Users | create/deactivate users, set passwords, unlock, assign roles |
+| | Enrollments | who is on which course and version, their mentor; enroll people or paste a list of emails, **choose which modules each learner gets**, withdraw, change mentor, **move a learner to the newest version** (with a preview) |
+| | Programs | named, ordered sets of courses; enroll a whole cohort at once |
 | | Roles | the permission matrix; admins can add roles |
 | | Sign-ins | successful and failed sign-in log |
 | Activity | Audit log | every administrative action |
@@ -138,7 +150,7 @@ For Trainers, Mentors and Admins (each sees only what their role allows). The le
 |---|---|
 | **Learner** | take courses |
 | **Mentor** | rate mentor-rated simulations (Ratings) |
-| **Trainer** | author courses, see results, reset attempts, rate and manage reviews |
+| **Trainer** | author courses, see results, reset attempts, rate and manage reviews, manage enrollments |
 | **Admin** | everything above, plus publish courses, manage users and roles, view the audit log |
 
 Roles are editable (Admin → Roles); permissions are listed in `backend/apps/accounts/rbac.py`.
@@ -150,9 +162,11 @@ Roles are editable (Admin → Roles); permissions are listed in `backend/apps/ac
 1. Sign in as the superuser → **Admin → People → Users** → create a Trainer, a Mentor and a Learner.
 2. As the Trainer: **Studio → New course**; add a module, a lesson and a few activities (reading, a quiz, a
    mentor-rated simulation); set the learning order; **Submit for review**. As an Admin: **Publish**.
-3. Sign in as the Learner (private window): open the course, work through the lesson, hand in the simulation.
-4. As the Mentor: **Admin → Ratings → Shared pool** → open the submission → score → send.
-5. As the Trainer: **Admin → Learners** to see progress and scores.
+3. As the Trainer: **Admin → People → Enrollments → Enroll people**: choose the course, a mentor, and the learner.
+4. Sign in as the Learner (private window): open the course, work through the lesson, hand in the simulation.
+5. As the Mentor: **Admin → Ratings → Mine** (work from their mentees) → open the submission → score → send.
+6. As the Trainer: **Admin → Learners** to see progress and scores. When you publish a new version of the
+   course, learners stay on theirs until you use **Enrollments → Move to newest**.
 
 ---
 
@@ -173,6 +187,7 @@ backend/
   apps/progress      learner progress, attempts, ordering rules, reports
   apps/bot_sim       AI practice tickets (scenarios, sessions, scoring, workers)
   apps/manual_sim    mentor-rated simulations (submissions, rubric ratings, deadlines, files)
+  apps/enrollment    who is on which course/version, programs, the access rule, moving between versions
   apps/media_pipeline  video upload, ffmpeg conversion, streaming
   apps/console       Admin Console API
   apps/audit         audit log
@@ -188,6 +203,8 @@ deploy/              nginx, systemd and backup notes for production
 * [docs/architecture.md](docs/architecture.md) — the overall design and roadmap
 * [docs/authoring-studio.md](docs/authoring-studio.md) — authoring and publishing
 * [docs/simbot.md](docs/simbot.md) — practice tickets (flow, scoring, operations, limits)
+* [docs/enrollment.md](docs/enrollment.md) — enrollment, programs, the access rule, moving learners between versions
+* [docs/scoring-open-questions.md](docs/scoring-open-questions.md) — what must be decided before the scoring roll-up (Module 8b) can be built
 * [docs/manual-simulation.md](docs/manual-simulation.md) — mentor-rated simulations
 * [docs/media-pipeline.md](docs/media-pipeline.md) — video upload and streaming
 * [docs/admin-parity-inventory.md](docs/admin-parity-inventory.md) — Django Admin → Admin Console parity
@@ -202,7 +219,7 @@ deploy/              nginx, systemd and backup notes for production
 | Reading, tracked video, quizzes | done |
 | AI practice tickets (+ question bank, Zendesk import behind a switch) | done; real-model latency not load-tested |
 | Mentor-rated simulations (rubric, deadlines, revisions, uploads) | done |
-| **Enrollment** (who is on which course, mentor assignment, version pinning) | **next** — until then every learner sees every published course and rated work goes to a shared pool |
+| **Enrollment** (who is on which course, mentor assignment, version pinning, programs, move to newest version, which modules each learner gets) | done: [docs/enrollment.md](docs/enrollment.md). Learners see only courses they are enrolled on; work from a learner with no mentor goes to the shared pool |
 | Weighted scoring rollup, certificates, cohort dashboard | not started (waiting on scoring rules) |
 | Notifications (email/Slack), SSO | not started |
 

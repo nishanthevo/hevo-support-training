@@ -128,11 +128,20 @@ export function PublishPanel({ course, apply }: Props) {
           {!dialog.checklist ? (
             <p className={styles.muted}>Checking the course…</p>
           ) : dialog.checklist.ok ? (
-            <p>
-              {publishing
-                ? 'Learners will see this version straight away. Anyone already on an earlier version keeps it.'
-                : 'The course will be locked while an administrator reviews it. They can send it back to you.'}
-            </p>
+            publishing ? (
+              <>
+                <p>Anyone already on an earlier version keeps it until a trainer moves them.</p>
+                <p className={styles.muted}>
+                  Publishing doesn’t enroll anyone. Learners only see this course once they’re
+                  enrolled, under People → Enrollments.
+                </p>
+              </>
+            ) : (
+              <p>
+                The course will be locked while an administrator reviews it. They can send it back
+                to you.
+              </p>
+            )
           ) : (
             <>
               <p>Fix these first:</p>

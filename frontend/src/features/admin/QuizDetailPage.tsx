@@ -41,7 +41,7 @@ export function QuizDetailPage() {
       header: 'Status',
       render: (l) => (
         <span className={`${styles.status} ${styles[`s_${l.state}`]}`}>
-          {statusLabel(l.state, 'mcq')}
+          {l.awaiting_review ? 'Awaiting review' : statusLabel(l.state, 'mcq')}
         </span>
       ),
     },

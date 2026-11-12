@@ -7,9 +7,38 @@ export interface QuizQuestion {
   /** One correct choice (index) or several; absent until the author picks. */
   answer?: number | number[]
   explanation?: string
+  /** 'written' = the learner types an answer and a person marks it. Absent = a choice question. */
+  type?: 'written'
+  /** Written only: what it is worth (1–10). */
+  max_marks?: number
+  /** Written only: what a good answer says. Only the people marking it see it, until the
+   * learner has passed or used every try. */
+  reference_answer?: string
+  /** Written only: the points a good answer covers, one per line. Optional; markers only. */
+  key_points?: string
 }
 
-export const isMultiple = (q: QuizQuestion) => Array.isArray(q.answer)
+export const isWritten = (q: QuizQuestion) => q.type === 'written'
+
+export const isMultiple = (q: QuizQuestion) => !isWritten(q) && Array.isArray(q.answer)
+
+export const newWrittenQuestion = (): QuizQuestion => ({
+  type: 'written',
+  text: '',
+  choices: [],
+  max_marks: 1,
+  reference_answer: '',
+})
+
+/** Switch a question between a choice question and a written one, keeping its text and
+ * explanation and dropping what only the other kind uses. */
+export function setWritten(q: QuizQuestion, written: boolean): QuizQuestion {
+  if (written === isWritten(q)) return q
+  const keep = { text: q.text, ...(q.explanation ? { explanation: q.explanation } : {}) }
+  return written
+    ? { ...keep, type: 'written', choices: [], max_marks: 1, reference_answer: '' }
+    : { ...keep, choices: ['', ''] }
+}
 
 export function correctChoices(q: QuizQuestion): number[] {
   if (Array.isArray(q.answer)) return q.answer

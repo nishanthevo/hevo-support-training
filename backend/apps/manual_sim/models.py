@@ -176,6 +176,11 @@ class SimSubmission(models.Model):
     def __str__(self) -> str:
         return f"{self.case} · revision {self.revision} ({self.state})"
 
+    @property
+    def learner_id(self) -> int:
+        """Whose work this is (the access helpers ask every reviewable item the same way)."""
+        return self.case.user_id
+
 
 class RubricScore(models.Model):
     """One criterion's score on one rated submission (the criterion's label is copied, so the
@@ -222,3 +227,102 @@ class SubmissionFile(models.Model):
 
     def __str__(self) -> str:
         return self.original_name
+
+
+class QuizReview(models.Model):
+    """One quiz attempt with written answers, waiting for (or given) its marks.
+
+    The learner's choice answers were scored at once; the written ones need a person. Until
+    they are marked there is **no** `ActivityAttempt` (its score and result are required), so
+    the work lives here, as a simulation's does, and the attempt is written by `rate`. It shares
+    the lifecycle fields of `SimSubmission` (state, routing, claim, review clock) so the same
+    `access` rules and the same queue serve both.
+    """
+
+    class State(models.TextChoices):
+        SUBMITTED = "submitted", "Waiting for marking"
+        RATED = "rated", "Marked"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="quiz_reviews"
+    )
+    activity = models.ForeignKey(
+        "catalog.Activity", on_delete=models.CASCADE, related_name="quiz_reviews"
+    )
+    # Which try this is (the attempt number it will become once marked).
+    attempt_no = models.PositiveIntegerField()
+    # One entry per question: the choice indexes picked, or the written text.
+    answers = models.JSONField(default=list)
+    # The auto-scored half: points earned and on offer from choice questions, and one entry per
+    # question (True/False for a choice question, null for a written one).
+    auto_earned = models.PositiveIntegerField(default=0)
+    auto_possible = models.PositiveIntegerField(default=0)
+    choice_results = models.JSONField(default=list)
+    submitted_at = models.DateTimeField()
+    review_due_at = models.DateTimeField()
+
+    state = models.CharField(max_length=10, choices=State.choices, default=State.SUBMITTED)
+    assigned_mentor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    routing = models.CharField(
+        max_length=10, choices=SimSubmission.Routing.choices, default=SimSubmission.Routing.POOL
+    )
+    claimed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+
+    rated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    rated_at = models.DateTimeField(null=True, blank=True)
+    overall_comment = models.TextField(blank=True)
+    attempt = models.ForeignKey(
+        "progress.ActivityAttempt",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    class Meta:
+        ordering = ["submitted_at", "id"]
+        constraints = [
+            # A learner may have only one written quiz waiting at a time, per quiz.
+            models.UniqueConstraint(
+                fields=["user", "activity"],
+                condition=Q(state="submitted"),
+                name="uniq_open_quiz_review",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["state", "submitted_at"], name="quiz_rev_state_when"),
+            models.Index(fields=["assigned_mentor", "state"], name="quiz_rev_mentor_state"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user} · {self.activity} · try {self.attempt_no} ({self.state})"
+
+    @property
+    def learner_id(self) -> int:
+        return self.user_id
+
+
+class QuizReviewMark(models.Model):
+    """The marks (and comment) one written question received."""
+
+    review = models.ForeignKey(QuizReview, on_delete=models.CASCADE, related_name="marks")
+    question_index = models.PositiveIntegerField()
+    max_marks = models.PositiveIntegerField()
+    marks = models.PositiveIntegerField()
+    comment = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["question_index"]
+        constraints = [
+            models.UniqueConstraint(fields=["review", "question_index"], name="uniq_quiz_mark")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.review} · question {self.question_index + 1}: {self.marks}/{self.max_marks}"

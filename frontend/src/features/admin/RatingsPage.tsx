@@ -61,11 +61,13 @@ export function RatingsPage() {
     },
     {
       key: 'activity',
-      header: 'Simulation',
+      header: 'Item',
       render: (r) => (
         <>
           {r.activity.title}
-          <span className={styles.sub}>{r.course}</span>
+          <span className={styles.sub}>
+            {r.kind === 'quiz' ? `Written quiz answers · ${r.course}` : r.course}
+          </span>
         </>
       ),
     },
@@ -75,7 +77,7 @@ export function RatingsPage() {
       hideOnMobile: true,
       render: (r) => (
         <>
-          {r.revision}
+          {r.kind === 'quiz' ? `Attempt ${r.revision}` : r.revision}
           {r.late && <span className={styles.sub}>handed in late</span>}
         </>
       ),
@@ -176,7 +178,7 @@ export function RatingsPage() {
     <AdminPage
       eyebrow="Review"
       title="Ratings"
-      hint="Mentor-rated simulations waiting for a review. Work routed to a learner’s mentor shows under Mine; everything else is in the shared pool for any mentor to take."
+      hint="Mentor-rated simulations and written quiz answers waiting for a review. Work routed to a learner’s mentor shows under Mine; everything else is in the shared pool for any mentor to take."
     >
       <div role="tablist" aria-label="Review queues" className={styles.tabs}>
         {tabs
@@ -254,11 +256,13 @@ export function RatingsPage() {
             />
           ) : (
             <DataTable
-              label="Simulations waiting for review"
+              label="Reviews waiting"
               columns={submissionColumns}
               rows={list.data.results as unknown as RatingRow[]}
-              rowKey={(r) => r.id}
-              rowHref={(r) => `/admin/ratings/${r.id}`}
+              rowKey={(r) => `${r.kind ?? 'sim'}-${r.id}`}
+              rowHref={(r) =>
+                r.kind === 'quiz' ? `/admin/ratings/quiz/${r.id}` : `/admin/ratings/${r.id}`
+              }
               meta={list.data}
               busy={list.refreshing}
               onPage={setPage}

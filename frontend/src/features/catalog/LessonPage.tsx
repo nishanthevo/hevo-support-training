@@ -80,7 +80,7 @@ export function LessonPage() {
 
   const done = progress.completed.has(node.id)
   const awaiting = progress.awaiting.has(node.id)
-  const pending = pendingRequired(lesson, progress.activities, progress.rated)
+  const pending = pendingRequired(lesson, progress.activities, progress.rated, progress.attempts)
   const canRecord = progress.available && !preview
   const canComplete = canRecord && pending.length === 0
   const reason = preview
@@ -191,7 +191,7 @@ export function LessonPage() {
           <div className={styles.complete}>
             {awaiting ? (
               <p className={styles.hint}>
-                You can move on. This lesson is complete once your mentor passes your simulation.
+                You can move on. This lesson is complete once your mentor passes your work.
               </p>
             ) : done ? (
               <>

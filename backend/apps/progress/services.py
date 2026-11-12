@@ -2,8 +2,9 @@
 Recording what a learner has done. Every rule lives here; the views only
 translate to HTTP.
 
-  * Only *published* content can be recorded against (drafts are the author's
-    workspace; archived versions belong to no new learner).
+  * A learner records against, and sees, only the course version they are *enrolled* on
+    (`enrollment.access.can_use`): drafts are the author's workspace, an unenrolled learner has
+    no courses, and a version that was since superseded stays theirs until they are moved.
   * Only activity types the platform can complete today are recordable
     (`registry.is_completable`); others render as "coming later" and never
     block a lesson.
@@ -23,11 +24,13 @@ from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
-from apps.activities import video
+from apps.activities import quiz, video
 from apps.activities.registry import get_type, is_completable
 from apps.catalog.models import Activity, ContentNode, CourseVersion
+from apps.enrollment import access
 
 from . import sequencing
 from .models import ActivityAttempt, ActivityProgress, LessonCompletion
@@ -85,19 +88,18 @@ class LessonBlocked(ProgressError):
         self.pending = pending
 
 
-def _published(version: CourseVersion) -> bool:
-    # Archiving a course retires it: nothing more can be recorded against it.
-    return version.state == CourseVersion.State.PUBLISHED and version.course.archived_at is None
-
-
-def _activity(activity_id: int) -> Activity:
+def _activity(activity_id: int, user) -> Activity:
     try:
-        activity = Activity.objects.select_related("content_node__course_version__course").get(
-            pk=activity_id
-        )
+        # `parent__parent` so a section's module is known without another query.
+        activity = Activity.objects.select_related(
+            "content_node__course_version__course", "content_node__parent__parent"
+        ).get(pk=activity_id)
     except Activity.DoesNotExist as exc:
         raise NotFound("That activity doesn’t exist.") from exc
-    if not _published(activity.content_node.course_version):
+    if not access.can_use(user, activity.content_node.course_version):
+        raise NotFound("That activity isn’t available.")
+    # A module switched off for this learner is refused exactly like one they aren't on.
+    if access.is_node_disabled(user, activity.content_node):
         raise NotFound("That activity isn’t available.")
     if not is_completable(activity.activity_type, activity.config):
         raise NotCompletable("This kind of activity can’t be completed yet.")
@@ -114,8 +116,8 @@ def _is_tracked(activity: Activity) -> bool:
     return descriptor is not None and descriptor.completion == "tracked"
 
 
-def _self_attested(activity_id: int) -> Activity:
-    activity = _activity(activity_id)
+def _self_attested(activity_id: int, user) -> Activity:
+    activity = _activity(activity_id, user)
     if _is_scored(activity):
         raise NotCompletable("This activity is completed by passing it.")
     # A Drive video can't be measured, so the learner confirms it, like a reading.
@@ -141,11 +143,15 @@ def _lesson_of(activity: Activity) -> ContentNode | None:
 # ----------------------------------------------------------------- sequencing
 
 
-def _lessons_in_order(version: CourseVersion) -> list[sequencing.LessonRef]:
-    """The course's lessons, modules in order and lessons within them."""
-    nodes = ContentNode.objects.filter(
-        course_version=version, kind=ContentNode.Kind.TOPIC
-    ).order_by("parent__order", "parent_id", "order", "id")
+def _lessons_in_order(
+    version: CourseVersion, disabled_modules: frozenset[int] = frozenset()
+) -> list[sequencing.LessonRef]:
+    """The course's lessons, modules in order and lessons within them. Lessons in a module
+    switched off for this learner are left out, so the order never waits on one they can't open."""
+    nodes = ContentNode.objects.filter(course_version=version, kind=ContentNode.Kind.TOPIC)
+    if disabled_modules:
+        nodes = nodes.exclude(parent_id__in=disabled_modules)
+    nodes = nodes.order_by("parent__order", "parent_id", "order", "id")
     return [sequencing.LessonRef(n.id, n.title, n.is_required) for n in nodes]
 
 
@@ -165,7 +171,7 @@ def lock_of(user, lesson: ContentNode | None) -> LessonLocked | None:
     version = lesson.course_version
     if version.learning_order != sequencing.SEQUENTIAL:
         return None
-    lessons = _lessons_in_order(version)
+    lessons = _lessons_in_order(version, access.disabled_module_ids(user, version))
     completed = set(
         LessonCompletion.objects.filter(user=user, node__course_version=version).values_list(
             "node_id", flat=True
@@ -188,7 +194,7 @@ def lesson_of(activity: Activity) -> ContentNode | None:
 
 
 def start_activity(user, activity_id: int) -> str:
-    activity = _activity(activity_id)
+    activity = _activity(activity_id, user)
     _assert_lesson_open(user, _lesson_of(activity))
     row, _ = ActivityProgress.objects.get_or_create(
         user=user, activity=activity, defaults={"started_at": timezone.now()}
@@ -198,7 +204,7 @@ def start_activity(user, activity_id: int) -> str:
 
 @transaction.atomic
 def complete_activity(user, activity_id: int) -> str:
-    activity = _self_attested(activity_id)
+    activity = _self_attested(activity_id, user)
     _assert_lesson_open(user, _lesson_of(activity))
     now = timezone.now()
     row, _ = ActivityProgress.objects.get_or_create(
@@ -215,7 +221,7 @@ def complete_activity(user, activity_id: int) -> str:
 def uncomplete_activity(user, activity_id: int) -> str | None:
     """Back to "started". If that activity was needed for an already
     completed lesson, the lesson is reopened too (it is no longer true)."""
-    activity = _self_attested(activity_id)
+    activity = _self_attested(activity_id, user)
     row = ActivityProgress.objects.filter(user=user, activity=activity).first()
     if row is None:
         return None
@@ -244,11 +250,26 @@ def lock_attempts(user, activity: Activity) -> tuple[ActivityProgress, int, int]
     )
     if row.state == ActivityProgress.State.COMPLETED:
         raise AttemptNotAllowed("You’ve already passed this one.")
+    if _awaiting_marks(user, activity):
+        raise AttemptNotAllowed(
+            "Your last attempt is still waiting for its written answers to be marked."
+        )
     taken = ActivityAttempt.objects.filter(user=user, activity=activity).count()
     limit = activity.max_attempts  # 0 = unlimited
     if limit and taken >= limit:
         raise AttemptNotAllowed("You’ve used all your attempts. Ask your trainer for another try.")
     return row, taken, limit
+
+
+def _awaiting_marks(user, activity: Activity) -> bool:
+    """Does this learner have a quiz attempt with written answers still waiting for marks?"""
+    if activity.activity_type != "mcq":
+        return False
+    from apps.manual_sim.models import QuizReview
+
+    return QuizReview.objects.filter(
+        user=user, activity=activity, state=QuizReview.State.SUBMITTED
+    ).exists()
 
 
 def record_attempt(
@@ -297,7 +318,7 @@ def submit_attempt(user, activity_id: int, raw_answers) -> dict:
     """Judge and record one try at a scored activity. The progress row is
     locked first, so two quick submits can't both take the last attempt or
     skip a number. A pass completes the activity (permanently)."""
-    activity = _activity(activity_id)
+    activity = _activity(activity_id, user)
     _assert_lesson_open(user, _lesson_of(activity))
     descriptor = get_type(activity.activity_type)
     if descriptor is None or descriptor.score is None or descriptor.review is None:
@@ -305,6 +326,9 @@ def submit_attempt(user, activity_id: int, raw_answers) -> dict:
 
     now = timezone.now()
     row, taken, limit = lock_attempts(user, activity)
+
+    if activity.activity_type == "mcq" and quiz.has_written(activity.config):
+        return _submit_with_written(user, activity, row, taken, limit, raw_answers, now)
 
     try:
         result, answers = descriptor.score(activity.config, raw_answers)
@@ -341,53 +365,139 @@ def submit_attempt(user, activity_id: int, raw_answers) -> dict:
     }
 
 
+def _submit_with_written(
+    user, activity: Activity, row: ActivityProgress, taken: int, limit: int, raw_answers, now
+) -> dict:
+    """A quiz with written questions: score the choice part now and park the written answers for
+    marking. No attempt is recorded until they are marked (see `manual_sim.quiz_reviews`); the
+    learner is told so, and the next lesson isn't held up."""
+    from apps.manual_sim import quiz_reviews
+
+    config = activity.config
+    try:
+        answers = quiz.validate_answers(config, raw_answers)
+    except quiz.InvalidAnswers as exc:
+        raise BadAnswers(str(exc)) from exc
+    earned, possible, results = quiz.choice_part(config, answers)
+    quiz_reviews.submit(
+        user,
+        activity,
+        attempt_no=taken + 1,
+        answers=answers,
+        auto_earned=earned,
+        auto_possible=possible,
+        choice_results=results,
+        now=now,
+    )
+    return {
+        "state": row.state,
+        "pending": True,
+        "passed": False,
+        "score": None,
+        "correct": earned,
+        "total": possible,
+        "needed": None,
+        "attempts_left": max(limit - taken - 1, 0) if limit else None,
+        "picks": answers,
+        # Nothing is revealed while it is being marked: the reference answers could be shared.
+        "review": quiz.review_attempt(config, answers, results, reveal=False, pending=True),
+        "history": _history(user, activity),
+    }
+
+
 def _history(user, activity: Activity) -> list[dict]:
     """Every try, oldest first — what a learner sees as "Your attempts"."""
-    return [
-        {
-            "number": a.number,
-            "score": a.score,
-            "correct": sum(a.details),
-            "total": len(a.details),
-            "passed": a.passed,
-            "submitted_at": a.submitted_at.isoformat(),
-        }
-        for a in ActivityAttempt.objects.filter(user=user, activity=activity).order_by("number")
-    ]
+    out = []
+    for a in ActivityAttempt.objects.filter(user=user, activity=activity).order_by("number"):
+        earned, possible = quiz.tally(a.details)
+        out.append(
+            {
+                "number": a.number,
+                "score": a.score,
+                "correct": earned,
+                "total": possible,
+                "passed": a.passed,
+                "submitted_at": a.submitted_at.isoformat(),
+            }
+        )
+    return out
 
 
 def attempts_report(user, activity_id: int) -> dict:
     """The learner's own attempt history and their latest try, reviewed. The
     answer key appears only under the same rule as when they submitted."""
-    activity = _activity(activity_id)
+    activity = _activity(activity_id, user)
     descriptor = get_type(activity.activity_type)
     if descriptor is None or descriptor.review is None:
         raise NotCompletable("This activity isn’t scored.")
     history = _history(user, activity)
     last = ActivityAttempt.objects.filter(user=user, activity=activity).order_by("-number").first()
-    if last is None:
-        return {"history": [], "latest": None}
     row = ActivityProgress.objects.filter(user=user, activity=activity).first()
     state = row.state if row else ActivityProgress.State.STARTED
-    finished = state in (ActivityProgress.State.COMPLETED, ActivityProgress.State.EXHAUSTED)
     limit = activity.max_attempts
+
+    waiting = _open_review(user, activity)
+    if waiting is not None:
+        # A written attempt is being marked: it is the latest try, and nothing is revealed yet.
+        taken = last.number if last else 0
+        return {
+            "history": history,
+            "latest": {
+                "state": state,
+                "pending": True,
+                "passed": False,
+                "score": None,
+                "correct": waiting.auto_earned,
+                "total": waiting.auto_possible,
+                "needed": None,
+                "attempts_left": max(limit - taken - 1, 0) if limit else None,
+                "picks": waiting.answers,
+                "review": quiz.review_attempt(
+                    activity.config,
+                    waiting.answers,
+                    waiting.choice_results,
+                    reveal=False,
+                    pending=True,
+                ),
+                "history": history,
+            },
+        }
+    if last is None:
+        return {"history": [], "latest": None}
+    finished = state in (ActivityProgress.State.COMPLETED, ActivityProgress.State.EXHAUSTED)
+    earned, possible = quiz.tally(last.details)
+    if quiz.has_written(activity.config):
+        review = quiz.review_attempt(activity.config, last.answers, last.details, reveal=finished)
+    else:
+        review = descriptor.review(
+            activity.config, SimpleNamespace(results=last.details), reveal=finished
+        )
     return {
         "history": history,
         "latest": {
             "state": state,
             "passed": last.passed,
             "score": last.score,
-            "correct": sum(last.details),
-            "total": len(last.details),
+            "correct": earned,
+            "total": possible,
             "needed": None,
             "attempts_left": max(limit - last.number, 0) if limit else None,
             "picks": last.answers,
-            "review": descriptor.review(
-                activity.config, SimpleNamespace(results=last.details), reveal=finished
-            ),
+            "review": review,
             "history": history,
         },
     }
+
+
+def _open_review(user, activity: Activity):
+    """The learner's quiz attempt that is waiting for written marks, if any."""
+    if activity.activity_type != "mcq":
+        return None
+    from apps.manual_sim.models import QuizReview
+
+    return QuizReview.objects.filter(
+        user=user, activity=activity, state=QuizReview.State.SUBMITTED
+    ).first()
 
 
 @transaction.atomic
@@ -397,9 +507,11 @@ def reset_attempts(user, activity_id: int) -> None:
     `ALLOW_ATTEMPT_RESET` is on; trainers get a proper screen later."""
     if not settings.ALLOW_ATTEMPT_RESET:
         raise ResetNotAllowed("Resetting attempts isn’t available here.")
-    activity = _activity(activity_id)
+    activity = _activity(activity_id, user)
     if not _is_scored(activity):
         raise NotCompletable("This activity has no attempts to reset.")
+    if _awaiting_marks(user, activity):
+        raise ResetNotAllowed("Your written answers are being marked, so this can’t be reset now.")
     _wipe_attempts(user, activity)
 
 
@@ -414,6 +526,11 @@ def _wipe_attempts(user, activity: Activity) -> dict:
         SimSession.objects.filter(
             user=user, activity=activity, preview=False, state__in=["open", "finishing"]
         ).update(state="abandoned", abandon_reason="reset")
+    if activity.activity_type == "mcq":
+        # Written answers waiting for marks, and the marks given, rested on these tries too.
+        from apps.manual_sim.models import QuizReview
+
+        QuizReview.objects.filter(user=user, activity=activity).delete()
     removed, _ = ActivityAttempt.objects.filter(user=user, activity=activity).delete()
     ActivityProgress.objects.filter(user=user, activity=activity).delete()
     lesson = _lesson_of(activity)
@@ -451,12 +568,14 @@ def reset_attempts_for(learner, activity_id: int) -> dict:
 # --------------------------------------------------------------------- lessons
 
 
-def _lesson(node_id: int) -> ContentNode:
+def _lesson(node_id: int, user) -> ContentNode:
     try:
         node = ContentNode.objects.select_related("course_version__course").get(pk=node_id)
     except ContentNode.DoesNotExist as exc:
         raise NotFound("That lesson doesn’t exist.") from exc
-    if node.kind != ContentNode.Kind.TOPIC or not _published(node.course_version):
+    if node.kind != ContentNode.Kind.TOPIC or not access.can_use(user, node.course_version):
+        raise NotFound("That lesson isn’t available.")
+    if access.is_node_disabled(user, node):
         raise NotFound("That lesson isn’t available.")
     return node
 
@@ -481,15 +600,27 @@ def _handed_in(user, activities: list[Activity]) -> set[int]:
         for a in activities
         if a.activity_type == "manual_sim" and manual_sim.holds_next(a.config) == "submit"
     ]
-    if not gated:
-        return set()
-    from apps.manual_sim.models import SimSubmission
+    handed: set[int] = set()
+    if gated:
+        from apps.manual_sim.models import SimSubmission
 
-    return set(
-        SimSubmission.objects.filter(case__user=user, case__activity_id__in=gated)
-        .exclude(state=SimSubmission.State.WITHDRAWN)
-        .values_list("case__activity_id", flat=True)
-    )
+        handed |= set(
+            SimSubmission.objects.filter(case__user=user, case__activity_id__in=gated)
+            .exclude(state=SimSubmission.State.WITHDRAWN)
+            .values_list("case__activity_id", flat=True)
+        )
+    # A quiz attempt whose written answers wait for marks also only awaits: it never holds the
+    # next lesson up (the lesson is provisional until it is marked).
+    quizzes = [a.id for a in activities if a.activity_type == "mcq"]
+    if quizzes:
+        from apps.manual_sim.models import QuizReview
+
+        handed |= set(
+            QuizReview.objects.filter(
+                user=user, activity_id__in=quizzes, state=QuizReview.State.SUBMITTED
+            ).values_list("activity_id", flat=True)
+        )
+    return handed
 
 
 def _unfinished(user, lesson: ContentNode) -> tuple[list[int], list[int]]:
@@ -519,7 +650,7 @@ def pending_activities(user, lesson: ContentNode) -> list[int]:
 
 @transaction.atomic
 def complete_lesson(user, node_id: int) -> None:
-    lesson = _lesson(node_id)
+    lesson = _lesson(node_id, user)
     _assert_lesson_open(user, lesson)
     pending, awaiting = _unfinished(user, lesson)
     if pending:
@@ -555,7 +686,7 @@ def settle_lesson(user, lesson: ContentNode | None, *, reopen: bool = False) -> 
 
 
 def uncomplete_lesson(user, node_id: int) -> None:
-    lesson = _lesson(node_id)
+    lesson = _lesson(node_id, user)
     LessonCompletion.objects.filter(user=user, node=lesson).delete()
 
 
@@ -568,21 +699,27 @@ def course_progress(user, version_id: int) -> dict:
         version = CourseVersion.objects.select_related("course").get(pk=version_id)
     except CourseVersion.DoesNotExist as exc:
         raise NotFound("That course doesn’t exist.") from exc
-    if not _published(version):
+    if not access.can_use(user, version):
         raise NotFound("That course isn’t available.")
-    completions = list(
-        LessonCompletion.objects.filter(user=user, node__course_version=version).values_list(
-            "node_id", "provisional"
-        )
-    )
+    disabled = access.disabled_module_ids(user, version)
+    hidden_lessons, hidden_activities = _hidden_in(version, disabled)
+    completions = [
+        (node_id, provisional)
+        for node_id, provisional in LessonCompletion.objects.filter(
+            user=user, node__course_version=version
+        ).values_list("node_id", "provisional")
+        if node_id not in hidden_lessons
+    ]
     lessons = [node_id for node_id, provisional in completions if not provisional]
     awaiting = [node_id for node_id, provisional in completions if provisional]
-    activities = dict(
-        ActivityProgress.objects.filter(
+    activities = {
+        activity_id: state
+        for activity_id, state in ActivityProgress.objects.filter(
             user=user, activity__content_node__course_version=version
         ).values_list("activity_id", "state")
-    )
-    ordered = _lessons_in_order(version)
+        if activity_id not in hidden_activities
+    }
+    ordered = _lessons_in_order(version, disabled)
     # A lesson awaiting a rating has opened what follows it, but isn't complete.
     done = {node_id for node_id, _ in completions}
     availability = sequencing.lesson_availability(ordered, done, version.learning_order)
@@ -591,10 +728,10 @@ def course_progress(user, version_id: int) -> dict:
         "completed_lessons": lessons,
         "awaiting_review_lessons": awaiting,
         "activities": activities,
-        "attempts": _attempt_summaries(user, version),
-        "watch": _watch_summaries(user, version),
-        "sim": _sim_summaries(user, version),
-        "rated": _rated_summaries(user, version),
+        "attempts": _without(_attempt_summaries(user, version), hidden_activities),
+        "watch": _without(_watch_summaries(user, version), hidden_activities),
+        "sim": _without(_sim_summaries(user, version), hidden_activities),
+        "rated": _without(_rated_summaries(user, version), hidden_activities),
         "can_reset_attempts": bool(settings.ALLOW_ATTEMPT_RESET),
         "learning_order": version.learning_order,
         # Only the locked lessons, each with what to finish first.
@@ -605,6 +742,28 @@ def course_progress(user, version_id: int) -> dict:
         },
         "next_lesson_id": sequencing.next_lesson_id(ordered, done, version.learning_order),
     }
+
+
+def _hidden_in(version: CourseVersion, disabled: frozenset[int]) -> tuple[set[int], set[int]]:
+    """(lesson ids, activity ids) inside the modules switched off for this learner. Nothing to
+    look up (no queries) for the usual learner with every module on."""
+    if not disabled:
+        return set(), set()
+    lessons = set(
+        ContentNode.objects.filter(
+            course_version=version, kind=ContentNode.Kind.TOPIC, parent_id__in=disabled
+        ).values_list("id", flat=True)
+    )
+    activities = set(
+        Activity.objects.filter(
+            Q(content_node__in=lessons) | Q(content_node__parent__in=lessons)
+        ).values_list("id", flat=True)
+    )
+    return lessons, activities
+
+
+def _without(by_activity: dict[int, dict], hidden: set[int]) -> dict[int, dict]:
+    return {k: v for k, v in by_activity.items() if k not in hidden} if hidden else by_activity
 
 
 def _sim_summaries(user, version: CourseVersion) -> dict[int, dict]:
@@ -678,12 +837,30 @@ def _attempt_summaries(user, version: CourseVersion) -> dict[int, dict]:
         entry["count"] += 1
         entry["best_score"] = max(entry["best_score"], score)
         entry["last_score"] = score
-    return {
-        activity_id: {
+    # A quiz attempt whose written answers are waiting to be marked: it is a try taken, but it
+    # has no score yet, so it never counts toward best/last.
+    from apps.manual_sim.models import QuizReview
+
+    waiting = dict(
+        QuizReview.objects.filter(
+            user=user,
+            activity__content_node__course_version=version,
+            state=QuizReview.State.SUBMITTED,
+        ).values_list("activity_id", "activity__max_attempts")
+    )
+    for activity_id, limit in waiting.items():
+        summaries.setdefault(
+            activity_id, {"count": 0, "best_score": 0.0, "last_score": 0.0, "limit": limit}
+        )
+    out = {}
+    for activity_id, e in summaries.items():
+        taken = e["count"] + (1 if activity_id in waiting else 0)
+        out[activity_id] = {
             "count": e["count"],
             "best_score": e["best_score"],
             "last_score": e["last_score"],
-            "attempts_left": max(e["limit"] - e["count"], 0) if e["limit"] else None,
+            "attempts_left": max(e["limit"] - taken, 0) if e["limit"] else None,
         }
-        for activity_id, e in summaries.items()
-    }
+        if activity_id in waiting:
+            out[activity_id]["pending"] = True
+    return out

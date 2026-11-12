@@ -79,9 +79,8 @@ flowchart TB
   end
 
   subgraph Plugins["Activity type plugins (in-process)"]
-    P1[video] --- P2[reading] --- P3[pdf]
-    P4[mcq] --- P5[workshop] --- P6[manual_sim]
-    P7[external_course] --- P8[bot_sim]
+    P1[video] --- P2[reading] --- P4[mcq]
+    P6[manual_sim] --- P8[bot_sim]
   end
 
   BOT["simbot (FastAPI)<br/>persona · chat · AI eval"]
@@ -378,12 +377,20 @@ Sources with no data yet are excluded and the remainder renormalised, so a mid-p
 | **YouTube** | IFrame Player API, in-app, `origin` locked, no related videos | Same interval algorithm from polled position; **plus a mandatory checkpoint question**, because the tracking alone is not trustworthy | Best-effort (flagged) |
 | **Confluence / internal wiki** | **Server-side proxy, not an iframe.** Django fetches `body.export_view` via a service-account API token, sanitises with `bleach` (allowlist, scripts stripped), rewrites image/attachment URLs through the same proxy, caches 15 min. Space allowlist + per-user authz before every fetch. | Scroll depth ≥ 90% + explicit "I've read this", or a checkpoint question | Good |
 | **Google Docs / Drive** | Two modes: `/preview` iframe for living documents; **export to HTML and re-host** for canonical content (preferred — Google gives no completion signal) | Dwell time ≥ estimated read time + acknowledge; optional checkpoint question | Weak (iframe) / Good (re-hosted) |
-| **PDF** | `pdf.js` viewer in-app | Pages-visited set ≥ 90% of pages | Good |
-| **External course (Scaler, KodeKloud)** | Cannot be embedded. Launch button + attestation form + optional certificate/screenshot upload | Learner attests → **trainer or mentor verifies** → optionally a native MCQ that actually tests the material. Verification, not attestation, completes it. | Attested + verified |
-| **Hands-on workshop** | In-app task checklist with instructions; artifact submission (screenshot, resource ARN/URL, or text) | Trainer sign-off on the submitted artifact (`mentor_signoff` predicate) | Human-verified |
+| ~~**PDF**~~ *(retired, never built)* | `pdf.js` viewer in-app | Pages-visited set ≥ 90% of pages | Good |
+| ~~**External course (Scaler, KodeKloud)**~~ *(retired, never built)* | Cannot be embedded. Launch button + attestation form + optional certificate/screenshot upload | Learner attests → **trainer or mentor verifies** → optionally a native MCQ that actually tests the material. Verification, not attestation, completes it. | Attested + verified |
+| ~~**Hands-on workshop**~~ *(retired, never built)* | In-app task checklist with instructions; artifact submission (screenshot, resource ARN/URL, or text) | Trainer sign-off on the submitted artifact (`mentor_signoff` predicate) | Human-verified |
 | **MCQ / Q&A** | Native quiz engine | Auto-scored against `mastery_threshold` | Exact |
 | **Bot simulation** | In-app chat, HALO launch | Outcome callback with metric scores | Exact |
 | **Manual simulation** | Rater UI in the SPA (mentor role) | Rubric metrics /5 + written feedback, submitted | Human-rated |
+
+**Retired types.** PDF, Workshop and External course were designed here but never finished (they could
+only ever say "coming later"), so they were retired: they are not in the activity-type registry, Studio
+doesn't offer them and the importer rejects them. Rows already in published and archived versions are
+history and stay as they are (inert, shown as "No longer available"); `manage.py retire_activity_types
+--course <slug>` removes them from a course's *draft* only. The model keeps the three values, labelled
+"(retired)", so old rows stay valid objects. A workshop or external course would come back as a
+mentor-rated activity rather than a new type.
 
 **Note on Confluence:** the proxy approach is the only one that reliably renders auth-gated Atlassian content in-app without handling user credentials, but it does re-serve Atlassian content from our server — confirm this is acceptable under your Atlassian terms before building it. Fallback if not: link out with a checkpoint question, at the cost of leaving the app.
 
@@ -607,7 +614,7 @@ training-platform/
 │   │   ├── statements/             # Statement model, ingest API, StatementSink, projector tasks
 │   │   ├── sequencing/             # rule predicates registry, evaluator, Progress, escalations
 │   │   ├── activities/             # plugin base + registry
-│   │   │   └── plugins/            # video/ reading/ pdf/ mcq/ workshop/ external_course/
+│   │   │   └── plugins/            # video/ reading/ mcq/
 │   │   │                           #   manual_sim/ bot_sim/ — each: schema.py, completion.py, meta.py
 │   │   ├── providers/              # ActivityProvider, launch tokens, outcome callback, HALO
 │   │   ├── assessment/             # Competency, Rubric, maps, rollup engine, ScoreRollupRun
@@ -662,10 +669,28 @@ Built as [manual-simulation.md](manual-simulation.md). Where it differs from the
   creates one generic `ActivityAttempt` (score = overall / 5). There is **no attempt limit**: deadlines
   (`SimCase.due_at`) and a trainer's extend / waive / close bound the work.
 * **`MentorAssignment` is per learner per course** (not per program/activity), written only by
-  `assignments.assign_mentor` for the enrolment workflow to call; until then everything goes to the shared pool.
+  `assignments.assign_mentor`, which enrollment now calls (a learner with no mentor goes to the shared pool).
 * **Handing in opens the next lesson** (setting `holds_next`, default): a lesson is marked complete as
   *provisional* while a mentor's rating is awaited, so it opens what follows but is not counted as complete until
   the rating passes. `sequencing.py` is unchanged; `progress.settle_lesson` keeps the flag in line with the activities.
 * **Amendments** ("a new versioned rating") are not built. Ratings are final.
 * The permission pair is `manual_sim.rate_submissions` and `manual_sim.manage_reviews`, added to
   `ROLE_PERMISSIONS` / `KNOWN_ACTIONS`; the role matrix shows both.
+
+## Enrollment (Module 8a)
+
+Details in [enrollment.md](enrollment.md).
+
+* **One access rule.** `enrollment.access.can_use(user, version)` replaces every learner-side "is this
+  published?" check: a learner uses only the version they are enrolled on (even after a newer one is
+  published); drafts are never learner-visible; authors may use what is published.
+* **Pinned versions, moved on purpose.** Publishing changes nobody. A trainer moves a learner with a
+  preview (`enrollment.migration`): activities and lessons are matched by `origin` lineage set in
+  `clone_version`, unchanged results are re-pointed (not copied), changed ones stay as history unless
+  carried by choice, and nothing is deleted. Preview and apply are the same code (the preview is rolled back).
+* **Modules per learner.** An enrollment may switch some modules (`segment`s) off
+  (`ModuleExclusion`). `access.disabled_module_ids` is read where the access rule is: the learner's
+  tree, `progress._activity`/`_lesson`, media, the learning order (`_lessons_in_order`) and
+  `course_progress`; the version move carries the choice through `origin` lineage.
+* **Seams kept.** `accounts` never imports enrollment; mentors are still written only through
+  `manual_sim.assignments`; `progress` depends only on `enrollment.access`.

@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 
-import { activityIcon, ACTIVITY_LABELS } from '../activityTypes'
+import { activityIcon, ACTIVITY_LABELS, isRetiredType } from '../activityTypes'
 import { ActivityShell } from './ActivityShell'
 import styles from './ActivityRunner.module.css'
 import { ManualSimActivity } from './ManualSimActivity'
@@ -20,7 +20,8 @@ const RENDERERS: Record<string, ComponentType<RendererProps>> = {
   manual_sim: ManualSimActivity,
 }
 
-/** Types without a renderer yet keep the same frame and say so plainly. */
+/** Types without a renderer keep the same frame and say so plainly: a retired type (never
+ * finished, no longer offered) can't be done, and anything else is still to come. */
 function Upcoming({ activity }: RendererProps) {
   const label = ACTIVITY_LABELS[activity.activity_type] ?? activity.activity_type
   return (
@@ -29,7 +30,9 @@ function Upcoming({ activity }: RendererProps) {
       title={activity.title}
       meta={`${label} · ${activity.is_required ? 'Required' : 'Optional'}`}
     >
-      <span className={styles.soon}>Available soon</span>
+      <span className={styles.soon}>
+        {isRetiredType(activity.activity_type) ? 'No longer available' : 'Available soon'}
+      </span>
     </ActivityShell>
   )
 }

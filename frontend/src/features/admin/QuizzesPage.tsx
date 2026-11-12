@@ -25,6 +25,7 @@ const COLUMNS: Column<QuizRow>[] = [
   { key: 'passed', header: 'Passed', align: 'end', render: (q) => q.passed },
   { key: 'not', header: 'Not passed', align: 'end', hideOnMobile: true, render: (q) => q.not_passed },
   { key: 'progress', header: 'In progress', align: 'end', hideOnMobile: true, render: (q) => q.in_progress },
+  { key: 'awaiting', header: 'Awaiting review', align: 'end', hideOnMobile: true, render: (q) => q.awaiting_review },
   { key: 'avg', header: 'Average best score', align: 'end', render: (q) => percent(q.average_best_score) },
 ]
 

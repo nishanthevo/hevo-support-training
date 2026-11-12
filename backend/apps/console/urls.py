@@ -1,7 +1,9 @@
 from django.urls import path
 
 from apps.bot_sim import console as practice
+from apps.enrollment import console as enrollments
 from apps.manual_sim import console as ratings
+from apps.manual_sim import quiz_console as quiz_reviews
 
 from . import audit_views, courses, results, roles, signins, users
 
@@ -78,6 +80,24 @@ urlpatterns = [
     ),
     path("ratings/submissions/<int:pk>/draft/", ratings.DraftView.as_view(), name="ratings-draft"),
     path("ratings/submissions/<int:pk>/rate/", ratings.RateView.as_view(), name="ratings-rate"),
+    # Written answers of a quiz: the same queue, their own page and actions
+    path("ratings/quiz-reviews/<int:pk>/", quiz_reviews.ThreadView.as_view(), name="quiz-thread"),
+    path(
+        "ratings/quiz-reviews/<int:pk>/claim/",
+        quiz_reviews.ClaimView.as_view(),
+        name="quiz-claim",
+    ),
+    path(
+        "ratings/quiz-reviews/<int:pk>/release/",
+        quiz_reviews.ReleaseView.as_view(),
+        name="quiz-release",
+    ),
+    path(
+        "ratings/quiz-reviews/<int:pk>/reassign/",
+        quiz_reviews.ReassignView.as_view(),
+        name="quiz-reassign",
+    ),
+    path("ratings/quiz-reviews/<int:pk>/rate/", quiz_reviews.RateView.as_view(), name="quiz-rate"),
     path(
         "ratings/cases/<int:case_id>/extend/", ratings.ExtendView.as_view(), name="ratings-extend"
     ),
@@ -87,6 +107,56 @@ urlpatterns = [
         "ratings/cases/<int:case_id>/reopen/", ratings.ReopenView.as_view(), name="ratings-reopen"
     ),
     # Courses back-office
+    # Enrollment: who is on which course, programs, mentors
+    path("enrollments/", enrollments.EnrollmentListView.as_view(), name="enrollments"),
+    path("enrollments/options/", enrollments.OptionsView.as_view(), name="enrollment-options"),
+    path("enrollments/people/", enrollments.PeopleView.as_view(), name="enrollment-people"),
+    path("enrollments/bulk/", enrollments.BulkView.as_view(), name="enrollment-bulk"),
+    path(
+        "enrollments/<int:pk>/withdraw/",
+        enrollments.WithdrawView.as_view(),
+        name="enrollment-withdraw",
+    ),
+    path(
+        "enrollments/<int:pk>/reenroll/",
+        enrollments.ReenrollView.as_view(),
+        name="enrollment-reenroll",
+    ),
+    path(
+        "enrollments/<int:pk>/mentor/", enrollments.MentorView.as_view(), name="enrollment-mentor"
+    ),
+    path(
+        "enrollments/<int:pk>/modules/",
+        enrollments.ModulesView.as_view(),
+        name="enrollment-modules",
+    ),
+    path(
+        "enrollments/<int:pk>/migration/",
+        enrollments.MigrationPreviewView.as_view(),
+        name="enrollment-migration",
+    ),
+    path(
+        "enrollments/<int:pk>/migrate/",
+        enrollments.MigrateView.as_view(),
+        name="enrollment-migrate",
+    ),
+    path("programs/", enrollments.ProgramListView.as_view(), name="programs"),
+    path("programs/<int:pk>/", enrollments.ProgramDetailView.as_view(), name="program"),
+    path(
+        "programs/<int:pk>/archive/",
+        enrollments.ProgramArchiveView.as_view(),
+        name="program-archive",
+    ),
+    path(
+        "programs/<int:pk>/restore/",
+        enrollments.ProgramRestoreView.as_view(),
+        name="program-restore",
+    ),
+    path(
+        "programs/<int:pk>/enroll-missing/",
+        enrollments.ProgramCatchUpView.as_view(),
+        name="program-enroll-missing",
+    ),
     path("courses/", courses.CourseListView.as_view(), name="courses"),
     path("courses/<int:course_id>/", courses.CourseDetailView.as_view(), name="course"),
     path(

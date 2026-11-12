@@ -9,14 +9,17 @@ import {
   addChoice,
   correctChoices,
   isMultiple,
+  isWritten,
   moveItemSafe,
   newQuestion,
+  newWrittenQuestion,
   readQuestions,
   removeAt,
   removeChoice,
   replaceAt,
   setCorrect,
   setMultiple,
+  setWritten,
   type QuizQuestion,
 } from './quizModel'
 import type { studioApi } from './studioApi'
@@ -41,6 +44,7 @@ export function QuizEditor({ activity, disabled, save }: EditorProps) {
   const [problem, setProblem] = useState<string | null>(null)
 
   const threshold = typeof config.pass_threshold === 'number' ? config.pass_threshold : 0.7
+  const hasWritten = questions.some(isWritten)
 
   // Edits build on the latest working copy, so two quick edits both survive.
   const write = useConfigWriter(config, (next) => save({ config: next }))
@@ -65,6 +69,14 @@ export function QuizEditor({ activity, disabled, save }: EditorProps) {
     await write((cfg) => ({ ...cfg, pass_threshold: percent / 100 }))
   }
 
+  async function saveMarks(index: number, text: string) {
+    const marks = Number(text)
+    if (text.trim() === '' || !Number.isInteger(marks) || marks < 1 || marks > 10) {
+      throw new Error('Enter a whole number from 1 to 10.')
+    }
+    await edit(index, (cur) => ({ ...cur, max_marks: marks }))
+  }
+
   async function saveAttempts(text: string) {
     const tries = Number(text)
     if (text.trim() === '' || !Number.isInteger(tries) || tries < 0) {
@@ -83,7 +95,11 @@ export function QuizEditor({ activity, disabled, save }: EditorProps) {
             value={String(Math.round(threshold * 100))}
             disabled={disabled}
             onSave={savePassMark}
-            hint="Share of questions to get right."
+            hint={
+              hasWritten
+                ? 'Share of the points to earn. A choice question is worth 1, a written one its marks.'
+                : 'Share of questions to get right.'
+            }
           />
         </div>
         <div className={styles.number}>
@@ -100,6 +116,13 @@ export function QuizEditor({ activity, disabled, save }: EditorProps) {
 
       {questions.length === 0 && (
         <p className={styles.empty}>No questions yet. Add the first one below.</p>
+      )}
+      {hasWritten && (
+        <p className={styles.note}>
+          Written answers are marked by a mentor or trainer, so a learner sees their final score
+          once those are marked. Someone with the Mentor role (or another role that may rate
+          submissions) is needed before this can be published.
+        </p>
       )}
 
       <ol className={styles.questions}>
@@ -132,7 +155,7 @@ export function QuizEditor({ activity, disabled, save }: EditorProps) {
                     className="icon-btn"
                     aria-label={`Delete question ${i + 1}`}
                     onClick={() =>
-                      q.text.trim() || q.choices.some((c) => c.trim())
+                      q.text.trim() || q.choices.some((c) => c.trim()) || q.reference_answer?.trim()
                         ? setRemoving(i)
                         : run(editQuestions((list) => removeAt(list, i)))
                     }
@@ -155,66 +178,127 @@ export function QuizEditor({ activity, disabled, save }: EditorProps) {
               onSave={(text) => edit(i, (cur) => ({ ...cur, text }))}
             />
 
-            <fieldset className={styles.choices} disabled={disabled}>
-              <legend className={styles.legend}>
-                Choices — {isMultiple(q) ? 'tick every correct one' : 'pick the correct one'}
-              </legend>
-              {q.choices.map((choice, c) => (
-                <div key={c} className={styles.choice}>
-                  <input
-                    type={isMultiple(q) ? 'checkbox' : 'radio'}
-                    name={`correct-${activity.id}-${i}`}
-                    className={styles.marker}
-                    aria-label={`Choice ${c + 1} is correct`}
-                    checked={correctChoices(q).includes(c)}
-                    onChange={(e) => run(edit(i, (cur) => setCorrect(cur, c, e.target.checked)))}
+            <label className={styles.kind}>
+              <span>Question type</span>
+              <select
+                className="input"
+                aria-label={`Type of question ${i + 1}`}
+                value={isWritten(q) ? 'written' : 'choice'}
+                disabled={disabled}
+                onChange={(e) =>
+                  run(edit(i, (cur) => setWritten(cur, e.target.value === 'written')))
+                }
+              >
+                <option value="choice">Choices (scored automatically)</option>
+                <option value="written">Written answer (marked by a person)</option>
+              </select>
+            </label>
+
+            {isWritten(q) ? (
+              <div className={styles.writtenFields}>
+                <div className={styles.number}>
+                  <AutosaveField
+                    label={`Marks for question ${i + 1}`}
+                    type="number"
+                    value={String(q.max_marks ?? 1)}
+                    disabled={disabled}
+                    onSave={(text) => saveMarks(i, text)}
+                    hint="What a full answer earns (1 to 10)."
                   />
-                  <div className={styles.grow}>
-                    <AutosaveField
-                      label={`Choice ${c + 1} of question ${i + 1}`}
-                      hideLabel
-                      compact
-                      value={choice}
-                      placeholder={`Choice ${c + 1}`}
-                      disabled={disabled}
-                      onSave={(text) =>
-                        edit(i, (cur) => ({ ...cur, choices: replaceAt(cur.choices, c, text) }))
-                      }
-                    />
-                  </div>
-                  {!disabled && (
+                </div>
+                <AutosaveField
+                  label="Reference answer"
+                  multiline
+                  rows={3}
+                  compact
+                  value={q.reference_answer ?? ''}
+                  placeholder="What a good answer says. Whoever marks it sees this."
+                  disabled={disabled}
+                  onSave={(reference_answer) => edit(i, (cur) => ({ ...cur, reference_answer }))}
+                  hint="Learners see it only once they have passed or used every try."
+                />
+                <AutosaveField
+                  label="Key points (optional)"
+                  multiline
+                  rows={3}
+                  compact
+                  value={q.key_points ?? ''}
+                  placeholder="One point per line that a good answer covers."
+                  disabled={disabled}
+                  onSave={(key_points) =>
+                    edit(i, (cur) => {
+                      const { key_points: _old, ...rest } = cur
+                      return key_points.trim() ? { ...rest, key_points } : rest
+                    })
+                  }
+                />
+              </div>
+            ) : (
+              <>
+                <fieldset className={styles.choices} disabled={disabled}>
+                  <legend className={styles.legend}>
+                    Choices — {isMultiple(q) ? 'tick every correct one' : 'pick the correct one'}
+                  </legend>
+                  {q.choices.map((choice, c) => (
+                    <div key={c} className={styles.choice}>
+                      <input
+                        type={isMultiple(q) ? 'checkbox' : 'radio'}
+                        name={`correct-${activity.id}-${i}`}
+                        className={styles.marker}
+                        aria-label={`Choice ${c + 1} is correct`}
+                        checked={correctChoices(q).includes(c)}
+                        onChange={(e) =>
+                          run(edit(i, (cur) => setCorrect(cur, c, e.target.checked)))
+                        }
+                      />
+                      <div className={styles.grow}>
+                        <AutosaveField
+                          label={`Choice ${c + 1} of question ${i + 1}`}
+                          hideLabel
+                          compact
+                          value={choice}
+                          placeholder={`Choice ${c + 1}`}
+                          disabled={disabled}
+                          onSave={(text) =>
+                            edit(i, (cur) => ({ ...cur, choices: replaceAt(cur.choices, c, text) }))
+                          }
+                        />
+                      </div>
+                      {!disabled && (
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label={`Remove choice ${c + 1} of question ${i + 1}`}
+                          disabled={q.choices.length <= 2}
+                          onClick={() => run(edit(i, (cur) => removeChoice(cur, c)))}
+                        >
+                          <Icon name="close" size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </fieldset>
+
+                {!disabled && (
+                  <div className={styles.row}>
                     <button
                       type="button"
-                      className="icon-btn"
-                      aria-label={`Remove choice ${c + 1} of question ${i + 1}`}
-                      disabled={q.choices.length <= 2}
-                      onClick={() => run(edit(i, (cur) => removeChoice(cur, c)))}
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => run(edit(i, addChoice))}
                     >
-                      <Icon name="close" size={14} />
+                      <Icon name="plus" size={14} /> Add choice
                     </button>
-                  )}
-                </div>
-              ))}
-            </fieldset>
-
-            {!disabled && (
-              <div className={styles.row}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => run(edit(i, addChoice))}
-                >
-                  <Icon name="plus" size={14} /> Add choice
-                </button>
-                <label className={styles.check}>
-                  <input
-                    type="checkbox"
-                    checked={isMultiple(q)}
-                    onChange={(e) => run(edit(i, (cur) => setMultiple(cur, e.target.checked)))}
-                  />
-                  More than one correct answer
-                </label>
-              </div>
+                    <label className={styles.check}>
+                      <input
+                        type="checkbox"
+                        checked={isMultiple(q)}
+                        onChange={(e) => run(edit(i, (cur) => setMultiple(cur, e.target.checked)))}
+                      />
+                      More than one correct answer
+                    </label>
+                  </div>
+                )}
+              </>
             )}
 
             <AutosaveField
@@ -243,13 +327,22 @@ export function QuizEditor({ activity, disabled, save }: EditorProps) {
       )}
 
       {!disabled && (
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => run(editQuestions((list) => [...list, newQuestion()]))}
-        >
-          <Icon name="plus" size={14} /> Add question
-        </button>
+        <div className={styles.row}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => run(editQuestions((list) => [...list, newQuestion()]))}
+          >
+            <Icon name="plus" size={14} /> Add question
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => run(editQuestions((list) => [...list, newWrittenQuestion()]))}
+          >
+            <Icon name="plus" size={14} /> Add written question
+          </button>
+        </div>
       )}
 
       {removing !== null && (
@@ -262,7 +355,7 @@ export function QuizEditor({ activity, disabled, save }: EditorProps) {
             setRemoving(null)
           }}
         >
-          This removes the question and its choices from the quiz.
+          This removes the question from the quiz.
         </ConfirmDialog>
       )}
     </div>

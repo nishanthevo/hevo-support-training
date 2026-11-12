@@ -144,10 +144,6 @@ class TestActivityConfigValidation:
                 Activity.ActivityType.MCQ,
                 {"questions": [{"text": "q1", "choices": ["a", "b"], "answer": 0}]},
             ),
-            (
-                Activity.ActivityType.EXTERNAL_COURSE,
-                {"provider_name": "Scaler", "course_url": "https://scaler.example/course"},
-            ),
         ],
     )
     def test_valid_config_passes(self, activity_type, config):
@@ -160,8 +156,6 @@ class TestActivityConfigValidation:
             (Activity.ActivityType.READING, {}),  # missing required source_url
             (Activity.ActivityType.VIDEO, {}),  # no video chosen
             (Activity.ActivityType.MCQ, {"questions": []}),  # violates minItems
-            # missing course_url
-            (Activity.ActivityType.EXTERNAL_COURSE, {"provider_name": "Scaler"}),
         ],
     )
     def test_invalid_config_raises(self, activity_type, config):
@@ -169,7 +163,17 @@ class TestActivityConfigValidation:
         with pytest.raises(ValidationError):
             activity.full_clean()
 
-    def test_unvalidated_activity_type_skips_schema(self):
-        # workshop/manual_sim/bot_sim have no schema in M1 — any config passes.
-        activity = self._make_activity(Activity.ActivityType.WORKSHOP, {"anything": "goes"})
-        activity.full_clean()  # must not raise
+    @pytest.mark.parametrize(
+        "activity_type",
+        [
+            Activity.ActivityType.PDF,
+            Activity.ActivityType.WORKSHOP,
+            Activity.ActivityType.EXTERNAL_COURSE,
+        ],
+    )
+    def test_a_retired_activity_type_no_longer_validates(self, activity_type):
+        # Their rows stay readable (see test_retired_activity_types), but a retired type is
+        # unknown to the registry, so nothing can be saved or published as one.
+        activity = self._make_activity(activity_type, {"anything": "goes"})
+        with pytest.raises(ValidationError, match="Unknown activity type"):
+            activity.full_clean()

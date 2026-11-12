@@ -55,3 +55,48 @@ def sample_clip(tmp_path_factory):
     if not HAVE_FFMPEG:
         pytest.skip("ffmpeg/ffprobe are not installed")
     return make_clip(tmp_path_factory.mktemp("clips") / "sample.mp4")
+
+
+@pytest.fixture(autouse=True)
+def _enroll_on_first_use(request, monkeypatch):
+    """Most tests are about something other than enrollment and were written when every
+    learner could open every published course. For them, a person who touches a published
+    course is enrolled on it (pinned to that version) the first time, through the real rows
+    and the real `can_use`. Tests of enrollment itself (marked `real_enrollment`) get none of
+    this, and so see the real rule."""
+    if request.node.get_closest_marker("real_enrollment"):
+        return
+    from django.utils import timezone
+
+    from apps.catalog.models import CourseVersion
+    from apps.enrollment import access
+    from apps.enrollment.models import Enrollment
+
+    real_can_use = access.can_use
+    real_usable = access.usable_versions
+
+    def can_use(user, version):
+        if (
+            getattr(user, "is_authenticated", False)
+            and version.state == CourseVersion.State.PUBLISHED
+            and version.course.archived_at is None
+        ):
+            row, _ = Enrollment.objects.get_or_create(
+                user=user,
+                course=version.course,
+                defaults={"version": version, "enrolled_at": timezone.now()},
+            )
+            if row.version_id == version.pk and row.state == Enrollment.State.ACTIVE:
+                return True  # what the real rule says, for one query instead of two
+        return real_can_use(user, version)
+
+    def usable_versions(user):
+        everything_published = CourseVersion.objects.filter(
+            course__archived_at__isnull=True,
+            root_node__isnull=False,
+            state=CourseVersion.State.PUBLISHED,
+        )
+        return everything_published | real_usable(user)
+
+    monkeypatch.setattr(access, "can_use", can_use)
+    monkeypatch.setattr(access, "usable_versions", usable_versions)

@@ -56,8 +56,8 @@ def _now():
     return timezone.now()
 
 
-def _video_activity(activity_id: int) -> Activity:
-    activity = services._activity(activity_id)  # published, exists, completable
+def _video_activity(activity_id: int, user) -> Activity:
+    activity = services._activity(activity_id, user)  # usable, exists, completable
     descriptor = get_type(activity.activity_type)
     if descriptor is None or descriptor.completion != "tracked":
         raise services.NotCompletable("This activity isn’t a video.")
@@ -100,7 +100,7 @@ def _state(
 
 def watch_state(user, activity_id: int) -> dict[str, Any]:
     """Where the learner is in this video (for resuming and the progress line)."""
-    activity = _video_activity(activity_id)
+    activity = _video_activity(activity_id, user)
     services._assert_lesson_open(user, services._lesson_of(activity))
     row = VideoWatch.objects.filter(user=user, activity=activity).first()
     return _state(user, row, activity)
@@ -135,7 +135,7 @@ def _parse(raw: Any, activity: Activity) -> dict[str, Any]:
 
 @transaction.atomic
 def record_watch(user, activity_id: int, raw: Any) -> dict[str, Any]:
-    activity = _video_activity(activity_id)
+    activity = _video_activity(activity_id, user)
     services._assert_lesson_open(user, services._lesson_of(activity))
     beat = _parse(raw, activity)
 

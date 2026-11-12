@@ -402,7 +402,7 @@ function Manage({
   )
 }
 
-function ReassignDialog({ t, onClose, onPick }: { t: RatingThread; onClose: () => void; onPick: (id: number | null) => void }) {
+export function ReassignDialog({ t, onClose, onPick }: { t: { learner: Person }; onClose: () => void; onPick: (id: number | null) => void }) {
   const mentors = useQuery(() => adminApi.ratingMentors(t.learner.id), `mentors-${t.learner.id}`)
   const [choice, setChoice] = useState('pool')
   const people: Person[] = mentors.data?.results ?? []

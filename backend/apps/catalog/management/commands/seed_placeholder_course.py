@@ -94,12 +94,11 @@ TREE = {
                             "title": "Advanced Transformations",
                             "activities": [
                                 (
-                                    Activity.ActivityType.EXTERNAL_COURSE,
-                                    "Scaler: Advanced SQL Transformations",
+                                    Activity.ActivityType.READING,
+                                    "Advanced SQL transformations guide",
                                     {
-                                        "provider_name": "Scaler",
-                                        "course_url": "https://scaler.example/advanced-sql",
-                                        "requires_verification": True,
+                                        "source_url": "https://docs.hevo.example/advanced-sql",
+                                        "estimated_read_minutes": 25,
                                     },
                                 ),
                             ],
@@ -169,9 +168,12 @@ TREE = {
                             "title": "Ticket Triage",
                             "activities": [
                                 (
-                                    Activity.ActivityType.WORKSHOP,
-                                    "Ticket triage exercise",
-                                    {},
+                                    Activity.ActivityType.READING,
+                                    "Ticket triage guide",
+                                    {
+                                        "source_url": "https://docs.hevo.example/ticket-triage",
+                                        "estimated_read_minutes": 10,
+                                    },
                                 ),
                             ],
                         },

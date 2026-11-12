@@ -160,18 +160,6 @@ ACTIVITY_TYPES: dict[str, ActivityTypeDescriptor] = {
             authorize_config=video.authorize_config,
         ),
         ActivityTypeDescriptor(
-            key="pdf",
-            label="PDF",
-            description="A PDF handout or slide deck.",
-            icon="file",
-            config_schema={
-                "type": "object",
-                "properties": {"pdf_url": {"type": "string", "title": "Link to the PDF"}},
-                "additionalProperties": True,
-            },
-            default_config={},
-        ),
-        ActivityTypeDescriptor(
             key="mcq",
             label="Quiz",
             description="Auto-scored questions with a pass mark.",
@@ -203,6 +191,21 @@ ACTIVITY_TYPES: dict[str, ActivityTypeDescriptor] = {
                                     "title": "Correct answer",
                                 },
                                 "explanation": {"type": "string", "title": "Explanation"},
+                                "type": {
+                                    "enum": ["single", "multiple", "written"],
+                                    "title": "Question type",
+                                },
+                                "max_marks": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 10,
+                                    "title": "Marks",
+                                },
+                                "reference_answer": {
+                                    "type": "string",
+                                    "title": "Reference answer",
+                                },
+                                "key_points": {"type": "string", "title": "Key points"},
                             },
                         },
                     },
@@ -223,38 +226,6 @@ ACTIVITY_TYPES: dict[str, ActivityTypeDescriptor] = {
             review=quiz.review,
             check_complete=quiz.check_complete,
             default_max_attempts=0,
-        ),
-        ActivityTypeDescriptor(
-            key="workshop",
-            label="Workshop",
-            description="A hands-on exercise completed with a mentor or on your own.",
-            icon="tool",
-            config_schema={
-                "type": "object",
-                "properties": {"instructions": {"type": "string", "title": "Instructions"}},
-                "additionalProperties": True,
-            },
-            default_config={},
-        ),
-        ActivityTypeDescriptor(
-            key="external_course",
-            label="External course",
-            description="A course hosted elsewhere, with completion verification.",
-            icon="external",
-            config_schema={
-                "type": "object",
-                "properties": {
-                    "provider_name": {"type": "string", "minLength": 1, "title": "Provider"},
-                    "course_url": {"type": "string", "minLength": 1, "title": "Course link"},
-                    "requires_verification": {
-                        "type": "boolean",
-                        "title": "Needs a certificate to verify",
-                    },
-                },
-                "required": ["provider_name", "course_url"],
-                "additionalProperties": True,
-            },
-            default_config={"provider_name": "", "course_url": ""},
         ),
         ActivityTypeDescriptor(
             key="manual_sim",

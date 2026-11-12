@@ -65,15 +65,9 @@ TYPE_ALIASES: dict[str, str] = {
     "read": "reading",
     "article": "reading",
     "video": "video",
-    "pdf": "pdf",
     "quiz": "mcq",
     "mcq": "mcq",
     "test": "mcq",
-    "workshop": "workshop",
-    "handson": "workshop",
-    "externalcourse": "external_course",
-    "external": "external_course",
-    "course": "external_course",
     "simulation": "manual_sim",
     "manualsim": "manual_sim",
     "mentorsimulation": "manual_sim",
@@ -85,9 +79,7 @@ TYPE_ALIASES: dict[str, str] = {
 # The config key a spreadsheet URL populates, per activity type.
 URL_CONFIG_KEY: dict[str, str] = {
     "reading": "source_url",
-    "pdf": "pdf_url",
     "video": "video_asset_ref",
-    "external_course": "course_url",
 }
 
 FALSE_WORDS = {"n", "no", "false", "0", "optional"}

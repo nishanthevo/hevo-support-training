@@ -151,6 +151,7 @@ def clone_version(source: CourseVersion) -> CourseVersion:
             description=old.description,
             is_required=old.is_required,
             estimated_minutes=old.estimated_minutes,
+            origin=old,
         )
         if old.id == source.root_node_id:
             new_root = clone
@@ -165,6 +166,7 @@ def clone_version(source: CourseVersion) -> CourseVersion:
                 mastery_threshold=activity.mastery_threshold,
                 points=activity.points,
                 order=activity.order,
+                origin=activity,
             )
         queue.extend((child, clone) for child in children[old.id])
 

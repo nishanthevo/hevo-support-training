@@ -200,7 +200,9 @@ class TestCourseProgress:
 
     def test_is_a_constant_number_of_queries(self, lc, course, django_assert_max_num_queries):
         post(lc, "activity-complete", course["lesson_own"].id)
-        with django_assert_max_num_queries(10):
+        with django_assert_max_num_queries(
+            13
+        ):  # +1 enrollment, +1 switched-off modules, +1 written quizzes awaiting marks
             assert lc.get(url("course", course["version"].id)).status_code == 200
 
 

@@ -41,6 +41,9 @@ export function AppShell() {
             <NavLink to="/" end className={({ isActive }) => (isActive ? styles.active : '')}>
               My courses
             </NavLink>
+            <NavLink to="/progress" className={({ isActive }) => (isActive ? styles.active : '')}>
+              My progress
+            </NavLink>
             {canAuthor && (
               <NavLink to="/studio" className={({ isActive }) => (isActive ? styles.active : '')}>
                 Studio

@@ -27,6 +27,31 @@ decimals** (`simbot_engine.outcome`); scaled = overall / 5; passed â‡” overall â
 (compared exactly) and, if `min_each` is set, no criterion below it. Shown as "3.5 / 5", **never a
 percentage**. Equal weights in V1.
 
+## Written quiz answers share this queue
+
+A quiz (`mcq`) may contain **written questions** next to choice questions. They are not a simulation, but
+they are marked by the same people, routed the same way and shown in the same queue, so they live beside
+this machinery (`quiz_reviews.py`, `quiz_console.py`). In short:
+
+* A learner submits the whole attempt. Choice questions are scored at once; the written answers are parked
+  as a `QuizReview` (routed with `assignments.route_for`, `review_due_at` from the activity's `review_hours`
+  or the platform target). **No `ActivityAttempt` exists yet**: it is written when the review is marked.
+* While it waits the learner can't start another try (it counts as a try taken), the lesson can be completed
+  *provisionally* and the next lesson is open, and nothing is revealed (a reference answer shared early would
+  defeat the next try).
+* A mentor or trainer gives each written question whole marks from 0 to its maximum (and an optional
+  comment). The score is over **every point** (a choice question is worth 1, a written one its `max_marks`)
+  with the quiz's normal pass mark; the attempt, the completion or exhaustion and the lesson settling all
+  happen in that one rating. Final, like a simulation rating.
+* Same `access` rules (`learner_id` on both kinds): the learner's mentor, the shared pool, escalation,
+  managers see everything, nobody marks their own. Permissions are the same two (`rate_submissions`,
+  `manage_reviews`). Audit actions are `quizzes.rate`, `quizzes.reassign`, `quizzes.take_over`,
+  `quizzes.release_other`.
+* Routes: `ratings/queue/` lists both kinds (`kind: "sim" | "quiz"`); the quiz has its own page and
+  `ratings/quiz-reviews/<id>/{,claim,release,reassign,rate}/`.
+* Limits: marks are whole numbers; no rater draft on quiz reviews (claim and rate only); reviews of a withdrawn
+  learner stay in the queue (as simulations do today); a trainer reset deletes a waiting review.
+
 ## Two clocks, never mixed
 
 | Clock | Where | Starts | Overdue means |

@@ -70,4 +70,5 @@ testpaths = ["tests"]
 markers = [
     "worker: starts a real Celery worker process (needs Postgres and ffmpeg)",
     "load: the 13-session load test; real processes, takes minutes (run with -m load)",
+    "real_enrollment: run with the real enrollment rule (no automatic enrollment on first use)",
 ]

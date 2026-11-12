@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   progressApi,
   type ActivityState,
+  type Answer,
   type AttemptResult,
   type AttemptSummary,
   type WatchBody,
@@ -47,7 +48,7 @@ export interface Progress {
   completeActivity: (id: number) => Promise<void>
   uncompleteActivity: (id: number) => Promise<void>
   /** Judged by the server; resolves with the result, rejects with a readable message. */
-  submitAttempt: (id: number, answers: number[][]) => Promise<AttemptResult>
+  submitAttempt: (id: number, answers: Answer[]) => Promise<AttemptResult>
   /** Forget the learner's tries so the activity can be taken again. */
   resetAttempts: (id: number) => Promise<void>
   /** Send a player heartbeat. The server alone decides what counts, and when a
@@ -143,9 +144,7 @@ export function useProgress(versionId: number | null, enabled = true): Progress 
       attempts: Object.fromEntries(
         Object.entries(data.attempts ?? {}).map(([id, a]) => [Number(id), a]),
       ),
-      watch: Object.fromEntries(
-        Object.entries(data.watch ?? {}).map(([id, w]) => [Number(id), w]),
-      ),
+      watch: Object.fromEntries(Object.entries(data.watch ?? {}).map(([id, w]) => [Number(id), w])),
       sim: Object.fromEntries(Object.entries(data.sim ?? {}).map(([id, v]) => [Number(id), v])),
       rated: Object.fromEntries(Object.entries(data.rated ?? {}).map(([id, v]) => [Number(id), v])),
       canReset: data.can_reset_attempts === true,
@@ -232,16 +231,29 @@ export function useProgress(versionId: number | null, enabled = true): Progress 
         const result = await progressApi.submitAttempt(id, answers)
         setState((s) => {
           const before = s.attempts[id]
+          // Written answers still to be marked: a try is taken, but there is no score yet.
           const attempts = {
             ...s.attempts,
-            [id]: {
-              count: (before?.count ?? 0) + 1,
-              best_score: Math.max(before?.best_score ?? 0, result.score),
-              last_score: result.score,
-              attempts_left: result.attempts_left,
-            },
+            [id]: result.pending
+              ? {
+                  count: before?.count ?? 0,
+                  best_score: before?.best_score ?? 0,
+                  last_score: before?.last_score ?? 0,
+                  attempts_left: result.attempts_left,
+                  pending: true,
+                }
+              : {
+                  count: (before?.count ?? 0) + 1,
+                  best_score: Math.max(before?.best_score ?? 0, result.score ?? 0),
+                  last_score: result.score ?? 0,
+                  attempts_left: result.attempts_left,
+                },
           }
-          return { ...s, attempts, activities: { ...s.activities, [id]: result.state } }
+          return {
+            ...s,
+            attempts,
+            activities: { ...s.activities, [id]: result.state },
+          }
         })
         return result
       },
@@ -251,7 +263,10 @@ export function useProgress(versionId: number | null, enabled = true): Progress 
           ...s,
           watch: {
             ...s.watch,
-            [id]: { watched_fraction: reply.watched_fraction, position: reply.position },
+            [id]: {
+              watched_fraction: reply.watched_fraction,
+              position: reply.position,
+            },
           },
           activities: reply.state ? { ...s.activities, [id]: reply.state } : s.activities,
         }))

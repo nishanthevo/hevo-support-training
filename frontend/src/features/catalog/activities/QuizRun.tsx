@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 
+import type { Answer } from '../../../lib/api'
 import { pluralize } from '../treeUtils'
 import styles from './QuizActivity.module.css'
-import type { Question } from './quizTypes'
+import { isAnswered, MAX_WRITTEN_CHARS, type Question } from './quizTypes'
 
 interface Props {
   activityId: number
   questions: Question[]
-  picks: number[][]
+  picks: Answer[]
   onPick: (question: number, choice: number, multiple: boolean) => void
+  /** Typing in a written question. */
+  onWrite: (question: number, text: string) => void
   /** Sends the answers; the parent shows the result. */
   onSubmit: () => void
   busy: boolean
@@ -24,6 +27,7 @@ export function QuizRun({
   questions,
   picks,
   onPick,
+  onWrite,
   onSubmit,
   busy,
   canRecord,
@@ -42,16 +46,21 @@ export function QuizRun({
 
   const question = questions[step]
   const last = step === questions.length - 1
-  const answered = (picks[step] ?? []).length > 0
-  const everyAnswered = picks.every((p) => p.length > 0)
-  const mine = picks[step] ?? []
+  const answered = isAnswered(picks[step])
+  const everyAnswered = picks.every(isAnswered)
+  const mine = Array.isArray(picks[step]) ? (picks[step] as number[]) : []
+  const text = typeof picks[step] === 'string' ? (picks[step] as string) : ''
+  const hasWritten = questions.some((q) => q.written)
 
   return (
     <div className={styles.run}>
       <p className={styles.step}>
         Question {step + 1} of {questions.length}
         <span className={styles.track} aria-hidden="true">
-          <span className={styles.trackFill} style={{ width: `${((step + 1) / questions.length) * 100}%` }} />
+          <span
+            className={styles.trackFill}
+            style={{ width: `${((step + 1) / questions.length) * 100}%` }}
+          />
         </span>
       </p>
 
@@ -59,22 +68,44 @@ export function QuizRun({
         <legend ref={promptRef} tabIndex={-1} className={styles.prompt}>
           {question.text}
         </legend>
-        {question.multiple && <p className={styles.hint}>Select all that apply.</p>}
-        <ul className={styles.choices}>
-          {question.choices.map((choice, c) => (
-            <li key={c}>
-              <label className={styles.choice} data-picked={mine.includes(c) || undefined}>
-                <input
-                  type={question.multiple ? 'checkbox' : 'radio'}
-                  name={`quiz-${activityId}-${step}`}
-                  checked={mine.includes(c)}
-                  onChange={() => onPick(step, c, question.multiple)}
-                />
-                <span>{choice}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
+        {question.written ? (
+          <>
+            <p className={styles.hint}>
+              Write your answer. A mentor or trainer will mark it
+              {question.maxMarks > 1 ? ` (worth ${question.maxMarks} marks)` : ''}.
+            </p>
+            <textarea
+              className={`input ${styles.written}`}
+              aria-label={`Your answer to question ${step + 1}`}
+              value={text}
+              maxLength={MAX_WRITTEN_CHARS}
+              rows={7}
+              onChange={(e) => onWrite(step, e.target.value)}
+            />
+            <p className={styles.counter}>
+              {text.length.toLocaleString()} of {MAX_WRITTEN_CHARS.toLocaleString()} characters
+            </p>
+          </>
+        ) : (
+          <>
+            {question.multiple && <p className={styles.hint}>Select all that apply.</p>}
+            <ul className={styles.choices}>
+              {question.choices.map((choice, c) => (
+                <li key={c}>
+                  <label className={styles.choice} data-picked={mine.includes(c) || undefined}>
+                    <input
+                      type={question.multiple ? 'checkbox' : 'radio'}
+                      name={`quiz-${activityId}-${step}`}
+                      checked={mine.includes(c)}
+                      onChange={() => onPick(step, c, question.multiple)}
+                    />
+                    <span>{choice}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </fieldset>
 
       {problem && (
@@ -113,10 +144,17 @@ export function QuizRun({
             Next
           </button>
         )}
-        {preview && last && <span className={styles.progress}>Answers aren’t scored in preview.</span>}
+        {preview && last && (
+          <span className={styles.progress}>Answers aren’t scored in preview.</span>
+        )}
+        {!preview && last && everyAnswered && hasWritten && (
+          <span className={styles.progress}>
+            Your written answers are marked by a person, so your final score comes later.
+          </span>
+        )}
         {!preview && last && !everyAnswered && (
           <span className={styles.progress}>
-            {pluralize(picks.filter((p) => p.length === 0).length, 'question')} left unanswered
+            {pluralize(picks.filter((p) => !isAnswered(p)).length, 'question')} left unanswered
           </span>
         )}
       </div>

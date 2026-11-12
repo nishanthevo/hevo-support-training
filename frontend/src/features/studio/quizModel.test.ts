@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest'
 import {
   addChoice,
   correctChoices,
+  isMultiple,
+  isWritten,
   moveItemSafe,
   newQuestion,
+  newWrittenQuestion,
+  setWritten,
   removeChoice,
   setCorrect,
   setMultiple,
@@ -51,5 +55,57 @@ describe('quiz question edits', () => {
     const same = [1, 2]
     expect(moveItemSafe(same, 0, -1)).toBe(same)
     expect(moveItemSafe(same, 1, 2)).toBe(same)
+  })
+})
+
+describe('written questions', () => {
+  it('a new written question is worth one mark and has no choices', () => {
+    expect(newWrittenQuestion()).toEqual({
+      type: 'written',
+      text: '',
+      choices: [],
+      max_marks: 1,
+      reference_answer: '',
+    })
+    expect(isWritten(newWrittenQuestion())).toBe(true)
+    expect(isWritten(newQuestion())).toBe(false)
+  })
+
+  it('switching to written keeps the text and explanation and drops the choices and answer', () => {
+    const next = setWritten({ ...multi, text: 'Why?', explanation: 'Because.' }, true)
+    expect(next).toEqual({
+      text: 'Why?',
+      explanation: 'Because.',
+      type: 'written',
+      choices: [],
+      max_marks: 1,
+      reference_answer: '',
+    })
+    expect('answer' in next).toBe(false)
+  })
+
+  it('switching back to choices keeps the text and drops what only written uses', () => {
+    const back = setWritten(
+      {
+        type: 'written',
+        text: 'Why?',
+        choices: [],
+        max_marks: 5,
+        reference_answer: 'x',
+        key_points: 'y',
+      },
+      false,
+    )
+    expect(back).toEqual({ text: 'Why?', choices: ['', ''] })
+  })
+
+  it('switching to the kind it already is changes nothing', () => {
+    const w = newWrittenQuestion()
+    expect(setWritten(w, true)).toBe(w)
+    expect(setWritten(single, false)).toBe(single)
+  })
+
+  it('a written question is never "several correct answers"', () => {
+    expect(isMultiple({ ...newWrittenQuestion(), answer: [0, 1] })).toBe(false)
   })
 })

@@ -104,7 +104,7 @@ export function LearnerDetailPage() {
                   </p>
                 </div>
                 <span className={`${styles.status} ${styles[`s_${a.state}`]}`}>
-                  {statusLabel(a.state, a.type)}
+                  {a.awaiting_review ? 'Awaiting review' : statusLabel(a.state, a.type)}
                 </span>
                 {a.scored && (
                   <span className={styles.score}>

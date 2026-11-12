@@ -36,6 +36,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "progress.manage_attempts",
         "manual_sim.rate_submissions",
         "manual_sim.manage_reviews",
+        "enrollment.manage_enrollments",
     ],
     Role.Name.MENTOR: ["manual_sim.rate_submissions"],
     Role.Name.ADMIN: [
@@ -48,6 +49,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "audit.view_audit",
         "manual_sim.rate_submissions",
         "manual_sim.manage_reviews",
+        "enrollment.manage_enrollments",
     ],
 }
 
@@ -65,6 +67,7 @@ KNOWN_ACTIONS: tuple[str, ...] = (
     "audit.view_audit",
     "manual_sim.rate_submissions",
     "manual_sim.manage_reviews",
+    "enrollment.manage_enrollments",
 )
 
 
@@ -90,12 +93,18 @@ ACTION_LABELS: dict[str, tuple[str, str]] = {
     ),
     "audit.view_audit": ("View the audit log", "See who changed what in the console."),
     "manual_sim.rate_submissions": (
-        "Rate simulations",
-        "Rate the mentor-rated simulations of learners assigned to you and the shared review pool.",
+        "Rate submissions",
+        "Rate the mentor-rated simulations and mark the written quiz answers of learners "
+        "assigned to you and the shared review pool.",
     ),
     "manual_sim.manage_reviews": (
-        "Manage simulation reviews",
-        "Reassign reviews, extend deadlines, waive or close cases, and rate any submission.",
+        "Manage reviews",
+        "Reassign reviews, extend deadlines, waive or close cases, and rate any submission "
+        "or written quiz answer.",
+    ),
+    "enrollment.manage_enrollments": (
+        "Manage enrollments",
+        "Enroll learners on courses and programs, assign mentors, move them to a newer version.",
     ),
 }
 
@@ -104,6 +113,7 @@ ADMIN_LOCKED_ACTIONS: tuple[str, ...] = (
     "accounts.manage_users",
     "accounts.manage_roles",
     "manual_sim.manage_reviews",
+    "enrollment.manage_enrollments",
 )
 
 

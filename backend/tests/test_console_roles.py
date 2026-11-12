@@ -63,6 +63,7 @@ class TestMatrix:
             "accounts.manage_users",
             "accounts.manage_roles",
             "manual_sim.manage_reviews",
+            "enrollment.manage_enrollments",
         ]
         assert roles["trainer"]["locked"] == []
 
@@ -114,7 +115,12 @@ class TestChange:
 
     def test_admins_can_still_gain_or_lose_the_rest(self, client, people, seeded):
         client.force_login(people["admin"])
-        keep = ["accounts.manage_users", "accounts.manage_roles", "manual_sim.manage_reviews"]
+        keep = [
+            "accounts.manage_users",
+            "accounts.manage_roles",
+            "manual_sim.manage_reviews",
+            "enrollment.manage_enrollments",
+        ]
         assert put(client, "admin", keep).status_code == 200
         assert put(client, "admin", [*keep, "audit.view_audit"]).status_code == 200
 

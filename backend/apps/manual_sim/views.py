@@ -41,7 +41,7 @@ class RatedSimView(ProgressView):
         return super().handle_exception(exc)
 
     def view_of(self, request: Request, activity_id: int) -> dict:
-        activity = services._activity(activity_id)
+        activity = services._activity(activity_id, request.user)
         return payloads.learner_view(request.user, activity, services._now())
 
 

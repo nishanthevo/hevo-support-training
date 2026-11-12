@@ -76,7 +76,12 @@ class CourseSummarySerializer(serializers.ModelSerializer):
         fields = ["id", "course_id", "title", "description", "version", "published_at"]
 
 
-def build_course_tree(course_version: CourseVersion, *, authoring: bool = False) -> dict:
+def build_course_tree(
+    course_version: CourseVersion,
+    *,
+    authoring: bool = False,
+    hide_node_ids: frozenset[int] = frozenset(),
+) -> dict:
     """Assemble the nested tree in Python from two queries (all nodes +
     their activities) instead of a recursive serializer, which would issue
     one query per node. Node counts are tens to low hundreds, so a single
@@ -85,6 +90,9 @@ def build_course_tree(course_version: CourseVersion, *, authoring: bool = False)
     `authoring=True` is for the Studio only: it includes each activity's
     `config` (never sent to learners — an MCQ's config holds the answers)
     and each node's `order`/`slug`.
+
+    `hide_node_ids` are modules switched off for this learner: they (and everything under them)
+    are left out, so the sidebar, the landing page and the progress figures all agree.
     """
     activity_serializer = AuthoringActivitySerializer if authoring else ActivitySummarySerializer
     nodes = list(
@@ -94,6 +102,8 @@ def build_course_tree(course_version: CourseVersion, *, authoring: bool = False)
     by_parent: dict[int | None, list[dict]] = {}
     root: dict | None = None
     for node in nodes:
+        if node.id in hide_node_ids:
+            continue
         payload = {
             "id": node.id,
             "kind": node.kind,

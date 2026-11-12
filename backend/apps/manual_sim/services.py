@@ -52,8 +52,8 @@ def _now():
 # ------------------------------------------------------------------------ lookups
 
 
-def _activity(activity_id: int) -> Activity:
-    activity = progress._activity(activity_id)  # published, exists, completable
+def _activity(activity_id: int, user) -> Activity:
+    activity = progress._activity(activity_id, user)  # usable, exists, completable
     if activity.activity_type != "manual_sim":
         raise Conflict("This activity isn’t a mentor-rated simulation.")
     return activity
@@ -143,7 +143,7 @@ def case_summary(case: SimCase, *, now=None, state: str | None = None) -> dict[s
 def open_case(user, activity_id: int, *, now=None) -> SimCase:
     """The learner opens the activity: their deadline starts (once). Safe to repeat."""
     now = now or _now()
-    activity = _activity(activity_id)
+    activity = _activity(activity_id, user)
     progress._assert_lesson_open(user, progress._lesson_of(activity))
     with transaction.atomic():
         ActivityProgress.objects.get_or_create(
@@ -193,7 +193,7 @@ def submit(user, activity_id: int, answer: Any, links: Any = None, uploads=(), *
 
 
 def _submit(user, activity_id, answer, links, uploads, now) -> SimSubmission:
-    activity = _activity(activity_id)
+    activity = _activity(activity_id, user)
     progress._assert_lesson_open(user, progress._lesson_of(activity))
     config = activity.config
     if not isinstance(answer, str) or not answer.strip():
@@ -307,13 +307,13 @@ def _withdraw(sub: SimSubmission, by: str) -> None:
 # ------------------------------------------------------ claiming, routing, drafting
 
 
-def _require_access(user, sub: SimSubmission, now):
+def _require_access(user, sub: access.Reviewable, now):
     decision = access.rating_access(user, sub, now)
     if decision.allowed:
         return decision
     if sub.state != S.SUBMITTED:
         raise Conflict(decision.reason)
-    if sub.case.user_id == user.pk or not access.is_rater(user):
+    if sub.learner_id == user.pk or not access.is_rater(user):
         raise Forbidden(decision.reason)
     if decision.held_by is not None:
         raise Conflict(decision.reason)

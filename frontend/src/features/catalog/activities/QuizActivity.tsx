@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 
-import { progressApi, type AttemptResult } from '../../../lib/api'
+import { progressApi, type Answer, type AttemptResult } from '../../../lib/api'
 import { useCourse } from '../courseContext'
 import { pluralize } from '../treeUtils'
 import { ActivityShell } from './ActivityShell'
 import styles from './QuizActivity.module.css'
 import { QuizResults } from './QuizResults'
 import { QuizRun } from './QuizRun'
-import { parseQuestions, percent } from './quizTypes'
+import { blankAnswers, parseQuestions, percent } from './quizTypes'
 import type { RendererProps } from './types'
 
 type View = 'closed' | 'run' | 'results'
@@ -31,10 +31,12 @@ export function QuizActivity({ activity }: RendererProps) {
     : activity.max_attempts > 0
       ? activity.max_attempts
       : null
-  const canTryAgain = !passed && !exhausted && attemptsLeft !== 0
+  // Written answers still waiting to be marked: no second try until they are.
+  const pending = summary?.pending === true
+  const canTryAgain = !passed && !exhausted && !pending && attemptsLeft !== 0
 
   const [view, setView] = useState<View>('closed')
-  const [picks, setPicks] = useState<number[][]>(() => questions.map(() => []))
+  const [picks, setPicks] = useState<Answer[]>(() => blankAnswers(questions))
   const [result, setResult] = useState<AttemptResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -42,33 +44,39 @@ export function QuizActivity({ activity }: RendererProps) {
 
   const requirement = activity.is_required ? 'Required' : 'Optional'
   const tries = summary ? pluralize(summary.count, 'attempt') : null
-  const meta = passed
-    ? `Quiz · Passed · best ${percent(summary?.best_score ?? 1)} · ${requirement}`
-    : exhausted
-      ? `Quiz · Not passed · best ${percent(summary?.best_score ?? 0)} · all attempts used · ${requirement}`
-      : summary
-        ? [
-            'Quiz',
-            `Best ${percent(summary.best_score)}`,
-            attemptsLeft === null ? tries : `${pluralize(attemptsLeft, 'attempt')} left`,
-            requirement,
-          ].join(' · ')
-        : `Quiz · ${pluralize(questions.length, 'question')} · Pass mark ${percent(passMark)} · ${requirement}`
+  const meta = pending
+    ? `Quiz · Written answers awaiting review · ${requirement}`
+    : passed
+      ? `Quiz · Passed · best ${percent(summary?.best_score ?? 1)} · ${requirement}`
+      : exhausted
+        ? `Quiz · Not passed · best ${percent(summary?.best_score ?? 0)} · all attempts used · ${requirement}`
+        : summary
+          ? [
+              'Quiz',
+              `Best ${percent(summary.best_score)}`,
+              attemptsLeft === null ? tries : `${pluralize(attemptsLeft, 'attempt')} left`,
+              requirement,
+            ].join(' · ')
+          : `Quiz · ${pluralize(questions.length, 'question')} · Pass mark ${percent(passMark)} · ${requirement}`
 
   function choose(question: number, choice: number, multiple: boolean) {
     setPicks((current) =>
       current.map((p, i) => {
-        if (i !== question) return p
+        if (i !== question || typeof p === 'string') return p
         if (!multiple) return [choice]
         return p.includes(choice) ? p.filter((c) => c !== choice) : [...p, choice].sort()
       }),
     )
   }
 
+  function write(question: number, text: string) {
+    setPicks((current) => current.map((p, i) => (i === question ? text : p)))
+  }
+
   function start() {
     setResult(null)
     setProblem(null)
-    setPicks(questions.map(() => []))
+    setPicks(blankAnswers(questions))
     setView('run')
   }
 
@@ -108,7 +116,7 @@ export function QuizActivity({ activity }: RendererProps) {
     try {
       await progress.resetAttempts(activity.id)
       setResult(null)
-      setPicks(questions.map(() => []))
+      setPicks(blankAnswers(questions))
       setView('closed')
     } catch (err) {
       setProblem(err instanceof Error ? err.message : 'We couldn’t reset the attempts.')
@@ -122,6 +130,7 @@ export function QuizActivity({ activity }: RendererProps) {
         questions={questions}
         picks={picks}
         onPick={choose}
+        onWrite={write}
         onSubmit={() => void submit()}
         busy={busy}
         canRecord={canRecord}
@@ -134,7 +143,7 @@ export function QuizActivity({ activity }: RendererProps) {
         questions={questions}
         passMark={passMark}
         canTryAgain={canTryAgain}
-        bestScore={summary?.best_score ?? result.score}
+        bestScore={summary?.best_score ?? result.score ?? 0}
         onTryAgain={start}
       />
     ) : problem ? (

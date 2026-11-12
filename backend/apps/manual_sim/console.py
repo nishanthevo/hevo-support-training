@@ -28,7 +28,7 @@ from apps.progress.reporting import display_name
 
 from . import access, assignments, eligibility, payloads, services
 from .errors import SimError
-from .models import SimCase, SimSubmission
+from .models import QuizReview, SimCase, SimSubmission
 
 S = SimSubmission.State
 RATE = eligibility.RATE
@@ -75,7 +75,7 @@ def _case_label(case: SimCase) -> str:
 # ------------------------------------------------------------------------- the queue
 
 
-def _route(sub: SimSubmission, me, now, rater_ids: set[int]) -> str:
+def _route(sub: access.Reviewable, me, now, rater_ids: set[int]) -> str:
     if access.escalated(sub, now) and sub.assigned_mentor_id is not None:
         return "escalated"
     if access.in_pool(sub, now, rater_ids):
@@ -90,6 +90,7 @@ def _queue_row(
     holder = access.lease(sub, now)
     decision = access.rating_access(me, sub, now, rater_ids)
     return {
+        "kind": "sim",
         "id": sub.pk,
         "learner": _who(sub.case.user),
         "activity": {"id": activity.pk, "title": activity.title},
@@ -176,6 +177,10 @@ class QueueView(_Base):
         subs = list(waiting if tab == "all" else waiting.exclude(case__user=me))
         attention = _attention_map([s.case_id for s in subs])
         rows = [_queue_row(s, me, now, rater_ids, attention) for s in subs]
+        # Quiz attempts with written answers wait in the same queue, under the same rules.
+        from . import quiz_console
+
+        rows += quiz_console.queue_rows(me, tab, now, rater_ids)
         if tab == "mine":
             rows = [r for r in rows if r["route"] == "mine"]
         elif tab == "pool":
@@ -184,7 +189,7 @@ class QueueView(_Base):
             rows = [r for r in rows if r["review_overdue"]]
         if wants_attention:
             rows = [r for r in rows if r["needs_attention"]]
-        return sorted(rows, key=lambda r: (r["review_due_at"], r["id"]))
+        return sorted(rows, key=lambda r: (r["review_due_at"], r["kind"], r["id"]))
 
     def _cases(self, now, overdue: bool, wants_attention: bool) -> list[dict]:
         cases = list(
@@ -236,10 +241,12 @@ class QueueView(_Base):
     def _counts(self, me, now) -> dict[str, int]:
         """How much is waiting, for the tab labels."""
         rater_ids = set(eligibility.raters().values_list("pk", flat=True))
-        subs = list(_WAITING.filter(state=S.SUBMITTED))
+        from . import quiz_console
+
+        subs: list[Any] = [*_WAITING.filter(state=S.SUBMITTED), *quiz_console.waiting_reviews()]
         out = {"all": len(subs)}
         if access.is_rater(me):
-            routes = [_route(s, me, now, rater_ids) for s in subs if s.case.user_id != me.pk]
+            routes = [_route(s, me, now, rater_ids) for s in subs if s.learner_id != me.pk]
             out["mine"] = routes.count("mine")
             out["pool"] = routes.count("pool") + routes.count("escalated")
         return out
@@ -523,6 +530,20 @@ class StatsView(_ManagerBase):
                 "review_due_at",
             )
         )
+        # Written quiz answers are reviewed on the same clock, so they count here too.
+        rated += list(
+            QuizReview.objects.filter(state=QuizReview.State.RATED, rated_at__gte=since)
+            .select_related("rated_by")
+            .values_list(
+                "rated_by_id",
+                "rated_by__first_name",
+                "rated_by__last_name",
+                "rated_by__email",
+                "submitted_at",
+                "rated_at",
+                "review_due_at",
+            )
+        )
         per: dict[int, dict] = {}
         hours: list[float] = []
         for uid, first, last, email, submitted, done, due in rated:
@@ -543,7 +564,10 @@ class StatsView(_ManagerBase):
             row["rated"] += 1
             row["hours"].append(h)
             row["late"] += 1 if done > due else 0
-        waiting = list(SimSubmission.objects.filter(state=S.SUBMITTED))
+        waiting: list[Any] = [
+            *SimSubmission.objects.filter(state=S.SUBMITTED),
+            *QuizReview.objects.filter(state=QuizReview.State.SUBMITTED),
+        ]
         return Response(
             {
                 "window_days": 30,

@@ -15,9 +15,13 @@ import { CourseDetailPage } from './features/admin/CourseDetailPage'
 import { CoursesPage } from './features/admin/CoursesPage'
 import { LearnerDetailPage } from './features/admin/LearnerDetailPage'
 import { DashboardPage } from './features/admin/DashboardPage'
+import { EnrollmentsPage } from './features/admin/EnrollmentsPage'
 import { LearnersPage } from './features/admin/LearnersPage'
 import { PracticeScenariosPage } from './features/admin/PracticeScenariosPage'
+import { ProgramsPage } from './features/admin/ProgramsPage'
+import { QuizReviewPage } from './features/admin/QuizReviewPage'
 import { RatingPage } from './features/admin/RatingPage'
+import { ProgressPage } from './features/catalog/ProgressPage'
 import { RatingsPage } from './features/admin/RatingsPage'
 import { QuizDetailPage } from './features/admin/QuizDetailPage'
 import { QuizzesPage } from './features/admin/QuizzesPage'
@@ -47,6 +51,7 @@ const CONSOLE_ACTIONS = [
   CAN.publishCourse,
   CAN.rateSimulations,
   CAN.manageReviews,
+  CAN.manageEnrollments,
 ]
 
 function App() {
@@ -61,6 +66,7 @@ function App() {
         }
       >
         <Route path="/" element={<CourseListPage />} />
+        <Route path="/progress" element={<ProgressPage />} />
         <Route path="/account/password" element={<ChangePasswordPage />} />
         {/* CourseRoute loads the tree once for both the landing and lesson views. */}
         <Route path="/courses/:courseId" element={<CourseRoute />}>
@@ -116,6 +122,7 @@ function App() {
             }
           >
             <Route index element={<RatingsPage />} />
+            <Route path="quiz/:reviewId" element={<QuizReviewPage />} />
             <Route path=":submissionId" element={<RatingPage />} />
           </Route>
           <Route
@@ -127,6 +134,26 @@ function App() {
             }
           >
             <Route index element={<PracticeScenariosPage />} />
+          </Route>
+          <Route
+            path="enrollments"
+            element={
+              <RequireCapability action={CAN.manageEnrollments}>
+                <Outlet />
+              </RequireCapability>
+            }
+          >
+            <Route index element={<EnrollmentsPage />} />
+          </Route>
+          <Route
+            path="programs"
+            element={
+              <RequireCapability action={CAN.manageEnrollments}>
+                <Outlet />
+              </RequireCapability>
+            }
+          >
+            <Route index element={<ProgramsPage />} />
           </Route>
           <Route
             path="users"

@@ -8,9 +8,10 @@ Viewing (stream the video or its poster):
   anonymous           refused (403, like the rest of the API)
   an author           what they uploaded, or what any draft / in-review course
                       uses (so the Studio preview works); an administrator, all
-  everyone else       only a **ready** video that a **published, not archived**
-                      course uses, **and** whose lesson is open to them under the
-                      course's order. If the course goes in order and the lesson
+  everyone else       only a **ready** video that a course version they may use
+                      (`enrollment.access.can_use`: the one they are enrolled on, or a
+                      published one for an author) contains, **and** whose lesson is open
+                      to them under the course's order. If the course goes in order and the lesson
                       is still locked, the answer is the same 409 the progress
                       API gives.
   anything else       404 — the same answer as "no such video", so nobody learns
@@ -28,6 +29,7 @@ from django.db.models import QuerySet
 
 from apps.accounts.rbac import can
 from apps.catalog.models import Activity, CourseVersion
+from apps.enrollment import access as enrollment_access
 from apps.progress import services as progress
 
 from .models import MediaAsset
@@ -61,7 +63,11 @@ DENY = Verdict(False)
 
 def can_view(user, asset: MediaAsset) -> Verdict:
     """May `user` stream this asset right now? (The caller handles anonymous.)"""
-    uses = list(uses_of(asset.pk).select_related("content_node__course_version__course"))
+    uses = list(
+        uses_of(asset.pk).select_related(
+            "content_node__course_version__course", "content_node__parent__parent"
+        )
+    )
 
     if can(user, AUTHOR):
         if asset.uploaded_by_id == user.pk or can(user, ADMIN):
@@ -72,11 +78,17 @@ def can_view(user, asset: MediaAsset) -> Verdict:
     # The learner rule (authors fall through to it for published courses too).
     if asset.status != MediaAsset.Status.READY:
         return DENY
-    published = [a for a in uses if _published(a.content_node.course_version)]
-    if not published:
+    # A use inside a module switched off for this learner doesn't count, even by direct URL.
+    usable = [
+        a
+        for a in uses
+        if enrollment_access.can_use(user, a.content_node.course_version)
+        and not enrollment_access.is_node_disabled(user, a.content_node)
+    ]
+    if not usable:
         return DENY
     first_lock: progress.LessonLocked | None = None
-    for activity in published:
+    for activity in usable:
         lock = progress.lock_of(user, progress.lesson_of(activity))
         if lock is None:
             return ALLOW
@@ -85,7 +97,3 @@ def can_view(user, asset: MediaAsset) -> Verdict:
 
 
 _OPEN = {s.value for s in CourseVersion.OPEN_STATES}
-
-
-def _published(version: CourseVersion) -> bool:
-    return version.state == CourseVersion.State.PUBLISHED and version.course.archived_at is None

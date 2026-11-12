@@ -187,7 +187,7 @@ describe('capabilities', () => {
   it('shows Studio in the nav only to people who can author', async () => {
     mockApi([], { 'GET /api/v1/catalog/courses/': () => ({ body: [] }) })
     renderAt('/')
-    await screen.findByText(/No courses yet/)
+    await screen.findByText(/You aren’t enrolled in a course yet/)
     expect(screen.queryByRole('link', { name: 'Studio' })).not.toBeInTheDocument()
   })
 
@@ -707,6 +707,94 @@ describe('Quiz editor', () => {
     await open(locked)
     expect(await screen.findByLabelText('Question 1 text')).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Add question' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add written question' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Type of question 1')).toBeDisabled()
+  })
+
+  describe('written questions', () => {
+    const written = {
+      type: 'written',
+      text: 'Explain the fix',
+      choices: [],
+      max_marks: 4,
+      reference_answer: 'Re-authorise, then resync.',
+    }
+
+    it('adds a written question with sensible defaults', async () => {
+      const calls = await open()
+      fireEvent.click(await screen.findByRole('button', { name: 'Add written question' }))
+      await waitFor(() => expect(patches(calls)).toHaveLength(1))
+      const added = (patches(calls)[0] as { config: { questions: unknown[] } }).config.questions
+      expect(added[1]).toEqual({
+        type: 'written',
+        text: '',
+        choices: [],
+        max_marks: 1,
+        reference_answer: '',
+      })
+    })
+
+    it('shows marks, reference answer and key points instead of choices, and says who marks it', async () => {
+      await open(quizCourse({ questions: [written] }))
+      expect(await screen.findByLabelText('Marks for question 1')).toHaveValue(4)
+      expect(screen.getByLabelText('Reference answer')).toHaveValue('Re-authorise, then resync.')
+      expect(screen.getByLabelText('Key points (optional)')).toHaveValue('')
+      expect(screen.queryByRole('button', { name: 'Add choice' })).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('More than one correct answer')).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Type of question 1')).toHaveValue('written')
+      expect(screen.getByText(/marked by a mentor or trainer/)).toBeInTheDocument()
+      expect(screen.getByText(/A choice question is worth 1, a written one its marks/)).toBeInTheDocument()
+    })
+
+    it('saves marks as a whole number from 1 to 10, and refuses anything else', async () => {
+      const calls = await open(quizCourse({ questions: [written] }))
+      const marks = await screen.findByLabelText('Marks for question 1')
+      for (const bad of ['0', '11', '2.5', '']) {
+        fireEvent.change(marks, { target: { value: bad } })
+        fireEvent.blur(marks)
+        expect(await screen.findByText('Enter a whole number from 1 to 10.')).toBeInTheDocument()
+      }
+      expect(patches(calls)).toHaveLength(0)
+      fireEvent.change(marks, { target: { value: '6' } })
+      fireEvent.blur(marks)
+      await waitFor(() => expect(patches(calls)).toHaveLength(1))
+      expect(
+        (patches(calls)[0] as { config: { questions: { max_marks: number }[] } }).config.questions[0].max_marks,
+      ).toBe(6)
+    })
+
+    it('saves the reference answer and drops empty key points', async () => {
+      const calls = await open(quizCourse({ questions: [{ ...written, key_points: 'one\ntwo' }] }))
+      const reference = await screen.findByLabelText('Reference answer')
+      fireEvent.change(reference, { target: { value: 'A better reference.' } })
+      fireEvent.blur(reference)
+      const points = screen.getByLabelText('Key points (optional)')
+      fireEvent.change(points, { target: { value: '  ' } })
+      fireEvent.blur(points)
+      await waitFor(() => expect(patches(calls)).toHaveLength(2))
+      const last = (patches(calls)[1] as { config: { questions: Record<string, unknown>[] } }).config
+        .questions[0]
+      expect(last.reference_answer).toBe('A better reference.')
+      expect('key_points' in last).toBe(false)
+    })
+
+    it('switches a question between choices and written, keeping its text', async () => {
+      const calls = await open()
+      fireEvent.change(await screen.findByLabelText('Type of question 1'), {
+        target: { value: 'written' },
+      })
+      await waitFor(() => expect(patches(calls)).toHaveLength(1))
+      const q = (patches(calls)[0] as { config: { questions: Record<string, unknown>[] } }).config
+        .questions[0]
+      expect(q).toMatchObject({ type: 'written', text: 'Where from?', choices: [], max_marks: 1 })
+      expect('answer' in q).toBe(false)
+    })
+
+    it('asks before deleting a written question that has content', async () => {
+      await open(quizCourse({ questions: [{ ...written, text: '' }] }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete question 1' }))
+      expect(await screen.findByRole('alertdialog')).toHaveTextContent('Delete question 1?')
+    })
   })
 })
 
@@ -795,6 +883,27 @@ describe('Publish workflow', () => {
     expect(await screen.findByRole('button', { name: 'Publish' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Return to draft' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Submit for publish' })).not.toBeInTheDocument()
+  })
+
+  it('the publish dialog says publishing does not enroll anyone', async () => {
+    const inReview = course({
+      status: { key: 'in_review', label: 'In review' },
+      editable: false,
+      actions: { start_draft: false, submit: false, publish: true, return_to_draft: true },
+    })
+    mockApi(
+      PUBLISHER,
+      routes(inReview, {
+        [`GET ${BASE}/courses/1/publish-checklist/`]: () => ({ body: { ok: true, issues: [] } }),
+      }),
+    )
+    renderAt('/studio/courses/1/curriculum')
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText(/Publishing doesn’t enroll anyone/)).toHaveTextContent(
+      'People → Enrollments',
+    )
+    expect(within(dialog).queryByText(/straight away/)).not.toBeInTheDocument()
   })
 
   it('a published course offers Edit, which starts a draft and opens the builder', async () => {

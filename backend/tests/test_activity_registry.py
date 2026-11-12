@@ -1,11 +1,15 @@
 import pytest
 
 from apps.activities import registry
+from apps.catalog.management.commands.retire_activity_types import RETIRED
 from apps.catalog.models import Activity
 
 
-def test_registry_covers_exactly_the_model_activity_types():
-    assert set(registry.ACTIVITY_TYPES) == set(Activity.ActivityType.values)
+def test_registry_covers_every_model_activity_type_except_the_retired_ones():
+    # Retired types stay in the model's choices so old published rows remain valid objects,
+    # but they are not in the registry, so nobody can author them any more.
+    assert set(registry.ACTIVITY_TYPES) | set(RETIRED) == set(Activity.ActivityType.values)
+    assert not set(registry.ACTIVITY_TYPES) & set(RETIRED)
 
 
 def test_descriptors_are_json_serialisable_and_have_schemas():
@@ -14,7 +18,7 @@ def test_descriptors_are_json_serialisable_and_have_schemas():
         assert entry["config_schema"]["type"] == "object"
 
 
-@pytest.mark.parametrize("activity_type", sorted(Activity.ActivityType.values))
+@pytest.mark.parametrize("activity_type", sorted(registry.ACTIVITY_TYPES))
 def test_default_config_is_valid_in_lenient_mode(activity_type):
     descriptor = registry.ACTIVITY_TYPES[activity_type]
     assert registry.validate_config(activity_type, descriptor.default_config, strict=False) == []
@@ -41,9 +45,12 @@ def test_unknown_type_and_non_object_config():
     assert registry.validate_config("reading", ["nope"], strict=False)
 
 
-def test_types_without_constraints_accept_any_object():
-    for key in ("pdf", "workshop"):
-        assert registry.validate_config(key, {"anything": 1}, strict=True) == []
+@pytest.mark.parametrize("key", sorted(RETIRED))
+def test_a_retired_type_is_unknown_to_the_registry(key):
+    assert registry.get_type(key) is None
+    assert registry.validate_config(key, {}, strict=False) == [f"Unknown activity type “{key}”."]
+    assert not registry.is_completable(key, {})
+    assert registry.learner_config(key, {"instructions": "x"}) == {}
 
 
 def test_incomplete_config_messages_use_the_field_titles():
@@ -85,7 +92,6 @@ def test_learner_config_is_an_allow_list():
         "source_url": "https://x",
         "estimated_read_minutes": 5,
     }
-    assert registry.learner_config("workshop", {"instructions": "x"}) == {}
     assert registry.learner_config("hologram", config) == {}
     assert registry.learner_config("reading", "not a dict") == {}
 

@@ -173,6 +173,12 @@ class ContentNode(models.Model):
     description = models.TextField(blank=True)
     is_required = models.BooleanField(default=True)
     estimated_minutes = models.PositiveIntegerField(null=True, blank=True)
+    # The node this one was copied from when its version was cloned. It is how a learner
+    # can be moved between versions: "the same lesson" is found by following this link, not
+    # by comparing titles. Null for content authored fresh or imported.
+    origin = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="copies"
+    )
 
     class Meta:
         permissions = [
@@ -222,10 +228,12 @@ class Activity(models.Model):
     class ActivityType(models.TextChoices):
         READING = "reading", "Reading"
         VIDEO = "video", "Video"
-        PDF = "pdf", "PDF"
+        # Retired: never finished (they could only ever say "coming later"). Authors can no
+        # longer add them; rows already in published and archived versions stay valid and inert.
+        PDF = "pdf", "PDF (retired)"
         MCQ = "mcq", "MCQ / quiz"
-        WORKSHOP = "workshop", "Hands-on workshop"
-        EXTERNAL_COURSE = "external_course", "External course"
+        WORKSHOP = "workshop", "Hands-on workshop (retired)"
+        EXTERNAL_COURSE = "external_course", "External course (retired)"
         MANUAL_SIM = "manual_sim", "Manual simulation"
         BOT_SIM = "bot_sim", "Bot simulation"
 
@@ -244,6 +252,10 @@ class Activity(models.Model):
     )
     points = models.PositiveIntegerField(default=0)
     order = models.PositiveIntegerField(default=0)
+    # The activity this one was copied from (see `ContentNode.origin`).
+    origin = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="copies"
+    )
 
     class Meta:
         ordering = ["order", "id"]

@@ -49,8 +49,8 @@ export function CourseListPage() {
   }
   if (data.length === 0) {
     return (
-      <PageState kind="empty" title="No courses yet">
-        Courses appear here once a trainer publishes them.
+      <PageState kind="empty" title="You aren’t enrolled in a course yet">
+        Ask your trainer to enroll you. Your courses will appear here.
       </PageState>
     )
   }

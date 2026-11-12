@@ -24,7 +24,11 @@ from apps.accounts.models import User
 from apps.accounts.rbac import can
 
 from . import eligibility
-from .models import SimSubmission
+from .models import QuizReview, SimSubmission
+
+# Anything the queue and the rating rules can act on: a simulation hand-in or a quiz attempt
+# with written answers. Both carry the same lifecycle fields and a `learner_id`.
+Reviewable = SimSubmission | QuizReview
 
 RATE = eligibility.RATE
 MANAGE = eligibility.MANAGE
@@ -41,7 +45,7 @@ def is_rater(user) -> bool:
 # --------------------------------------------------------------------------- clocks
 
 
-def lease(sub: SimSubmission, now) -> User | None:
+def lease(sub: Reviewable, now) -> User | None:
     """Who currently holds the claim (None if nobody, or the lease ran out)."""
     if sub.claimed_by_id is None or sub.claimed_at is None:
         return None
@@ -50,17 +54,17 @@ def lease(sub: SimSubmission, now) -> User | None:
     return sub.claimed_by
 
 
-def review_overdue(sub: SimSubmission, now) -> bool:
+def review_overdue(sub: Reviewable, now) -> bool:
     return sub.state == SimSubmission.State.SUBMITTED and now > sub.review_due_at
 
 
-def escalated(sub: SimSubmission, now) -> bool:
+def escalated(sub: Reviewable, now) -> bool:
     """Overdue by more than the grace: open to any eligible rater, whoever it was routed to."""
     grace = timedelta(hours=settings.MANUAL_SIM_ESCALATION_GRACE_HOURS)
     return sub.state == SimSubmission.State.SUBMITTED and now > sub.review_due_at + grace
 
 
-def in_pool(sub: SimSubmission, now, rater_ids: set[int] | None = None) -> bool:
+def in_pool(sub: Reviewable, now, rater_ids: set[int] | None = None) -> bool:
     """Open to any eligible rater: routed to the pool, escalated, or routed to someone who is
     no longer able to rate."""
     if sub.assigned_mentor_id is None or escalated(sub, now):
@@ -84,12 +88,12 @@ class Access:
     held_by: User | None = None  # someone else's live claim, if that is what blocks you
 
 
-def rating_access(user, sub: SimSubmission, now=None, rater_ids: set[int] | None = None) -> Access:
+def rating_access(user, sub: Reviewable, now=None, rater_ids: set[int] | None = None) -> Access:
     """May `user` claim, draft and rate this submission right now?"""
     now = now or timezone.now()
     if not is_rater(user):
         return Access(False, reason="You can’t rate simulations.")
-    if sub.case.user_id == user.pk:
+    if sub.learner_id == user.pk:
         return Access(False, reason="You can’t rate your own work.")
     if sub.state != SimSubmission.State.SUBMITTED:
         return Access(False, reason="This submission isn’t waiting for a rating.")
@@ -107,11 +111,11 @@ def rating_access(user, sub: SimSubmission, now=None, rater_ids: set[int] | None
     return Access(False, reason="This submission is with another mentor.")
 
 
-def can_see(user, sub: SimSubmission, now=None) -> bool:
+def can_see(user, sub: Reviewable, now=None) -> bool:
     """May `user` read this submission and its thread? The learner who made it; managers; anyone
     who may rate it now; and the people who see learners' results."""
     now = now or timezone.now()
-    if sub.case.user_id == user.pk:
+    if sub.learner_id == user.pk:
         return True
     if is_manager(user) or can(user, "progress.view_results"):
         return True

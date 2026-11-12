@@ -440,12 +440,11 @@
     "pk": 5,
     "fields": {
       "content_node": 8,
-      "activity_type": "external_course",
-      "title": "Scaler: Advanced SQL Transformations",
+      "activity_type": "reading",
+      "title": "Advanced SQL transformations guide",
       "config": {
-        "course_url": "https://scaler.example/advanced-sql",
-        "provider_name": "Scaler",
-        "requires_verification": true
+        "source_url": "https://docs.hevo.example/advanced-sql",
+        "estimated_read_minutes": 25
       },
       "is_required": true,
       "max_attempts": 3,
@@ -524,9 +523,12 @@
     "pk": 9,
     "fields": {
       "content_node": 15,
-      "activity_type": "workshop",
-      "title": "Ticket triage exercise",
-      "config": {},
+      "activity_type": "reading",
+      "title": "Ticket triage guide",
+      "config": {
+        "source_url": "https://docs.hevo.example/ticket-triage",
+        "estimated_read_minutes": 10
+      },
       "is_required": true,
       "max_attempts": 3,
       "mastery_threshold": null,

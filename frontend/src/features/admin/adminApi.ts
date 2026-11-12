@@ -60,6 +60,8 @@ export interface LearnerActivity {
   required: boolean
   state: ActivityStatus
   scored: boolean
+  /** A quiz attempt whose written answers are waiting to be marked. */
+  awaiting_review?: boolean
   best_score: number | null
   attempts: AttemptRow[]
   max_attempts: number
@@ -127,6 +129,8 @@ export interface QuizRow {
   passed: number
   not_passed: number
   in_progress: number
+  /** Attempts whose written answers are waiting to be marked. */
+  awaiting_review: number
   average_best_score: number | null
 }
 
@@ -135,6 +139,8 @@ export interface QuizLearnerRow {
   name: string
   email: string
   state: ActivityStatus
+  /** A written attempt is waiting to be marked (it has no score yet). */
+  awaiting_review?: boolean
   attempts: number
   best_score: number | null
   last_score: number | null
@@ -456,7 +462,10 @@ export type CaseStatus =
   | 'waived'
   | 'not_passed'
 
+
 export interface RatingRow {
+  /** A simulation hand-in, or a quiz attempt whose written answers wait for marks. */
+  kind?: 'sim' | 'quiz'
   id: number
   learner: Person
   activity: { id: number; title: string }
@@ -571,6 +580,58 @@ export interface RatingThread {
   revisions: ThreadRevision[]
 }
 
+/** One question of a quiz attempt waiting for marks (or marked). */
+export interface QuizReviewQuestion {
+  index: number
+  kind: 'choice' | 'written'
+  text: string
+  /** Choice questions: the options, what the learner picked, and whether it was right. */
+  choices?: string[]
+  picked?: number[]
+  correct?: boolean | null
+  /** Written questions: what it is worth, what the learner wrote, what to look for, and the
+   * marks given so far. */
+  max_marks?: number
+  answer?: string
+  reference_answer?: string
+  key_points?: string
+  marks?: number | null
+  comment?: string
+}
+
+/** The marking page for a quiz attempt with written answers. */
+export interface QuizReviewThread {
+  kind: 'quiz'
+  id: number
+  state: 'submitted' | 'rated'
+  attempt_no: number
+  learner: Person
+  activity: { id: number; title: string }
+  course: string
+  pass_threshold: number
+  points_possible: number
+  points_needed: number
+  auto: { earned: number; possible: number }
+  questions: QuizReviewQuestion[]
+  mentor_for_course: string | null
+  routing: RatingThread['routing']
+  access: RatingThread['access']
+  result: {
+    marked_by: string | null
+    marked_at: string | null
+    score: number | null
+    passed: boolean | null
+    comment: string
+  } | null
+  attempts: { number: number; score: number; passed: boolean; submitted_at: string }[]
+}
+
+export interface QuizRatingBody {
+  marks: Record<string, number>
+  comments: Record<string, string>
+  comment: string
+}
+
 export interface RatingBody {
   scores: Record<string, number | null>
   feedback: Record<string, string>
@@ -607,6 +668,168 @@ export interface RatedOverview {
     escalated: boolean
     assigned_mentor: string | null
   } | null
+}
+
+// -------------------------------------------------------------- enrollment
+
+export type EnrollmentState = 'active' | 'withdrawn'
+
+export interface EnrollmentRow {
+  id: number
+  user: Person
+  course: { id: number; title: string; archived: boolean }
+  /** The version they are on; `older` when a newer one has been published since. */
+  version: {
+    id: number
+    number: number
+    latest_number: number | null
+    older: boolean
+  }
+  program: { id: number; name: string } | null
+  mentor: Person | null
+  /** How many of the course's modules they get. */
+  modules: { enabled: number; total: number }
+  state: EnrollmentState
+  source: string
+  enrolled_at: string
+  withdrawn_at: string | null
+  withdrawn_reason: string
+}
+
+export interface EnrollOptions {
+  courses: {
+    id: number
+    title: string
+    modules: { id: number; title: string }[]
+  }[]
+  programs: { id: number; name: string; course_ids: number[] }[]
+  mentors: Person[]
+}
+
+/** One learner's modules on one course: what the course has and what is on for them. */
+export interface EnrollmentModules {
+  active: boolean
+  modules: { id: number; title: string; enabled: boolean }[]
+}
+
+export interface PickPerson extends Person {
+  on_course: boolean
+}
+
+/** What happened to one person in an enroll request. */
+export interface EnrollResult {
+  user: Person
+  outcome: 'enrolled' | 'reactivated' | 'already' | 'failed' | 'program'
+  detail?: string
+  courses?: { course_id: number; outcome: string; detail: string }[]
+}
+
+export interface BulkRow {
+  line: number
+  email: string
+  mentor_email: string
+  status: string
+  label: string
+  detail: string
+  user: Person | null
+  courses: { id: number; state: string; detail: string }[]
+}
+
+export interface BulkReply {
+  applied: boolean
+  summary: Record<string, number>
+  rows: BulkRow[]
+}
+
+export interface ProgramCourseRow {
+  course_id: number
+  title: string
+  required: boolean
+  published: boolean
+  archived: boolean
+}
+
+export interface ProgramRow {
+  id: number
+  name: string
+  description: string
+  starts_on: string | null
+  ends_on: string | null
+  archived: boolean
+  members: number
+  courses: ProgramCourseRow[]
+}
+
+export interface ProgramBody {
+  name: string
+  description: string
+  starts_on: string | null
+  ends_on: string | null
+  courses: { course_id: number; required: boolean }[]
+}
+
+export type MoveStatus = 'preserved' | 'changed' | 'added'
+
+export interface MoveActivity {
+  id: number
+  title: string
+  type: string
+  status: MoveStatus
+  work: string[]
+  has_work: boolean
+  /** Which parts of a changed activity differ (field names, "attempts", "pass mark"). */
+  fields: string[]
+  conflict: boolean
+  carried: boolean
+  can_carry: boolean
+}
+
+export interface MoveLesson {
+  id: number
+  title: string
+  module: string
+  /** What happens to their tick on this lesson, when they had one. */
+  outcome: 'kept' | 'awaiting' | 'reopened' | 'left' | null
+  activities: MoveActivity[]
+}
+
+export interface MovePreview {
+  blockers: string[]
+  can_apply: boolean
+  from: { id: number; number: number }
+  to: { id: number; number: number } | null
+  counts?: {
+    preserved: number
+    preserved_untouched: number
+    changed: number
+    changed_carried: number
+    changed_with_work: number
+    added: number
+    removed: number
+    removed_with_work: number
+    lessons_kept: number
+    lessons_awaiting: number
+    lessons_reopened: number
+    lessons_left: number
+    modules_new: number
+    modules_new_off: number
+  }
+  /** The newest version's modules: `new` ones can be switched off here; `off` ones stay off. */
+  modules?: {
+    id: number
+    title: string
+    status: 'on' | 'off' | 'new'
+    enabled: boolean
+  }[]
+  lessons?: MoveLesson[]
+  removed?: {
+    id: number
+    title: string
+    type: string
+    lesson: string
+    has_work: boolean
+  }[]
+  left_lessons?: { id: number; title: string }[]
 }
 
 const send = (method: string, body?: unknown): RequestInit => ({
@@ -703,6 +926,19 @@ export const adminApi = {
     request<RatingThread>(admin(`ratings/submissions/${id}/draft/`), send('POST', body)),
   rate: (id: number, body: RatingBody) =>
     request<RatingThread>(admin(`ratings/submissions/${id}/rate/`), send('POST', body)),
+  quizReviewThread: (id: number | string) =>
+    request<QuizReviewThread>(admin(`ratings/quiz-reviews/${id}/`)),
+  claimQuizReview: (id: number) =>
+    request<QuizReviewThread>(admin(`ratings/quiz-reviews/${id}/claim/`), send('POST')),
+  releaseQuizReview: (id: number) =>
+    request<QuizReviewThread>(admin(`ratings/quiz-reviews/${id}/release/`), send('POST')),
+  reassignQuizReview: (id: number, mentorId: number | null) =>
+    request<QuizReviewThread>(
+      admin(`ratings/quiz-reviews/${id}/reassign/`),
+      send('POST', { mentor_id: mentorId }),
+    ),
+  rateQuizReview: (id: number, body: QuizRatingBody) =>
+    request<QuizReviewThread>(admin(`ratings/quiz-reviews/${id}/rate/`), send('POST', body)),
   caseAction: (id: number, action: 'extend' | 'waive' | 'close' | 'reopen', body: { reason: string; days?: number }) =>
     request<{ case: { id: number; status: CaseStatus; due_at: string | null; overdue: boolean } }>(
       admin(`ratings/cases/${id}/${action}/`),
@@ -713,4 +949,68 @@ export const adminApi = {
   ratingStats: () => request<RatingStats>(admin('ratings/stats/')),
   transcript: (id: number | string) =>
     request<PracticeTranscript>(admin(`results/sessions/${id}/`)),
+  enrollOptions: () => request<EnrollOptions>(admin('enrollments/options/')),
+  enrollPeople: (q: Query) => request<{ results: PickPerson[] }>(admin('enrollments/people/', q)),
+  enrollments: (q: Query) => request<Paged<EnrollmentRow>>(admin('enrollments/', q)),
+  enroll: (body: {
+    user_ids: number[]
+    course_id?: number
+    program_id?: number
+    mentor_id?: number | null
+    module_ids?: number[]
+  }) => request<{ results: EnrollResult[] }>(admin('enrollments/'), send('POST', body)),
+  bulkEnroll: (body: {
+    text: string
+    course_id?: number
+    program_id?: number
+    mentor_id?: number | null
+    module_ids?: number[]
+    apply: boolean
+  }) => request<BulkReply>(admin('enrollments/bulk/'), send('POST', body)),
+  withdraw: (id: number, reason: string) =>
+    request<EnrollmentRow>(admin(`enrollments/${id}/withdraw/`), send('POST', { reason })),
+  reenroll: (id: number) =>
+    request<EnrollmentRow>(admin(`enrollments/${id}/reenroll/`), send('POST')),
+  setMentor: (id: number, mentorId: number | null) =>
+    request<EnrollmentRow>(
+      admin(`enrollments/${id}/mentor/`),
+      send('POST', { mentor_id: mentorId }),
+    ),
+  enrollmentModules: (id: number) =>
+    request<EnrollmentModules>(admin(`enrollments/${id}/modules/`)),
+  setModules: (id: number, moduleIds: number[]) =>
+    request<EnrollmentRow>(
+      admin(`enrollments/${id}/modules/`),
+      send('POST', { module_ids: moduleIds }),
+    ),
+  movePreview: (id: number, carry: number[], newModulesOff: number[] = []) =>
+    request<MovePreview>(
+      admin(`enrollments/${id}/migration/`),
+      send('POST', { carry, new_modules_off: newModulesOff }),
+    ),
+  move: (id: number, toVersionId: number, carry: number[], newModulesOff: number[] = []) =>
+    request<{ result: MovePreview; enrollment: EnrollmentRow }>(
+      admin(`enrollments/${id}/migrate/`),
+      send('POST', {
+        to_version_id: toVersionId,
+        carry,
+        new_modules_off: newModulesOff,
+      }),
+    ),
+  programs: (archived = false) =>
+    request<{ results: ProgramRow[] }>(admin('programs/', { archived: archived ? 1 : undefined })),
+  createProgram: (body: ProgramBody) => request<ProgramRow>(admin('programs/'), send('POST', body)),
+  updateProgram: (id: number, body: ProgramBody) =>
+    request<ProgramRow>(admin(`programs/${id}/`), send('PUT', body)),
+  archiveProgram: (id: number) =>
+    request<ProgramRow>(admin(`programs/${id}/archive/`), send('POST')),
+  restoreProgram: (id: number) =>
+    request<ProgramRow>(admin(`programs/${id}/restore/`), send('POST')),
+  enrollMissing: (id: number) =>
+    request<{
+      people: number
+      enrolled: number
+      skipped: number
+      program: ProgramRow
+    }>(admin(`programs/${id}/enroll-missing/`), send('POST')),
 }

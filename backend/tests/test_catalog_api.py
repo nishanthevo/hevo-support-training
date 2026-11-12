@@ -141,7 +141,8 @@ class TestCourseTree:
             Activity.objects.create(content_node=node, activity_type="reading", title="R")
 
         # session + user lookup + version + nodes + activities prefetch
-        with django_assert_max_num_queries(6):
+        # +1: which modules are switched off for this learner
+        with django_assert_max_num_queries(7):
             response = auth_client.get(reverse("catalog_api:course-tree", args=[cv.pk]))
         assert response.status_code == 200
 

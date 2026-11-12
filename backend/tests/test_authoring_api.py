@@ -261,10 +261,10 @@ class TestActivities:
     def test_reorder_and_delete(self, trainer_client):
         _, _, _, section = make_valid_course(trainer_client)
         a = post(
-            trainer_client, "node-activities", section["id"], data={"activity_type": "workshop"}
+            trainer_client, "node-activities", section["id"], data={"activity_type": "reading"}
         ).json()
         b = post(
-            trainer_client, "node-activities", section["id"], data={"activity_type": "pdf"}
+            trainer_client, "node-activities", section["id"], data={"activity_type": "video"}
         ).json()
         put(
             trainer_client, "node-activities-order", section["id"], data={"ids": [b["id"], a["id"]]}

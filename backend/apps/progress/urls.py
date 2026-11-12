@@ -5,6 +5,7 @@ from . import views
 app_name = "progress_api"
 
 urlpatterns = [
+    path("summary/", views.SummaryView.as_view(), name="summary"),
     path("courses/<int:version_id>/", views.CourseProgressView.as_view(), name="course"),
     path("activities/<int:pk>/start/", views.ActivityStartView.as_view(), name="activity-start"),
     path(

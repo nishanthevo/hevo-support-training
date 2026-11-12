@@ -80,9 +80,14 @@ export function LessonItem({
       </span>
       <span className={styles.aside}>
         {primary && (
-          <span className={styles.type} title={ACTIVITY_LABELS[primary.activity_type]}>
+          <span
+            className={styles.type}
+            title={ACTIVITY_LABELS[primary.activity_type] ?? primary.activity_type}
+          >
             <Icon name={activityIcon(primary.activity_type)} size={14} />
-            <span className="sr-only">{ACTIVITY_LABELS[primary.activity_type]}</span>
+            <span className="sr-only">
+              {ACTIVITY_LABELS[primary.activity_type] ?? primary.activity_type}
+            </span>
           </span>
         )}
         {variant === 'detailed' && minutes != null && (

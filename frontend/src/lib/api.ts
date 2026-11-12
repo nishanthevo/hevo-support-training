@@ -161,6 +161,8 @@ export interface AttemptSummary {
   last_score: number
   /** Null when attempts are unlimited. */
   attempts_left: number | null
+  /** A try whose written answers are waiting to be marked: taken, but with no score yet. */
+  pending?: boolean
 }
 
 export interface CourseProgressPayload {
@@ -247,22 +249,39 @@ export interface WatchReply {
 /** Per-question feedback. The key and explanation arrive only once the quiz
  * is passed or the last attempt is spent. */
 export interface QuestionReview {
-  correct: boolean
+  /** Absent on a choice question from a quiz without written answers. */
+  kind?: 'choice' | 'written'
+  correct?: boolean
   correct_answers?: number[]
   explanation?: string
+  /** Written questions: the learner's own text, what it is worth, and (once marked) the marks
+   * and the marker's comment; the reference answer only when the server reveals it. */
+  answer?: string
+  max?: number
+  marks?: number | null
+  comment?: string
+  pending?: boolean
+  reference_answer?: string
+  key_points?: string
 }
+
+/** One answer: the choice indexes picked, or the text written. */
+export type Answer = number[] | string
 
 export interface AttemptResult {
   state: ActivityState
   passed: boolean
-  score: number
+  /** Null while written answers wait to be marked. */
+  score: number | null
+  /** True while written answers wait to be marked: only the choice part is scored so far. */
+  pending?: boolean
   correct: number
   total: number
   /** Questions that had to be right to pass (unknown when reloading an old try). */
   needed: number | null
   attempts_left: number | null
-  /** What the learner picked, one list of choice indexes per question. */
-  picks: number[][]
+  /** What the learner answered: choice indexes, or the written text, per question. */
+  picks: Answer[]
   review: QuestionReview[]
   history: AttemptHistoryRow[]
 }
@@ -277,6 +296,59 @@ export interface AttemptHistoryRow {
   submitted_at: string
 }
 
+/** One course in the learner's own progress report (facts only: no overall score or rank). */
+export interface ProgressCourse {
+  course_id: number
+  version_id: number
+  title: string
+  lessons_total: number
+  lessons_done: number
+  /** Lessons moved past while written answers or work wait to be marked. */
+  lessons_awaiting_review: number
+  next_lesson: { id: number; title: string } | null
+  quizzes: ProgressQuiz[]
+  practice: ProgressTicket[]
+  rated: ProgressRated[]
+}
+
+interface ProgressItem {
+  activity_id: number
+  lesson_id: number
+  lesson_title: string
+  title: string
+  required: boolean
+}
+
+export interface ProgressQuiz extends ProgressItem {
+  status: 'not_started' | 'in_progress' | 'passed' | 'not_passed' | 'awaiting_review'
+  /** Tries taken, including one still waiting for its written answers to be marked. */
+  attempts_used: number
+  /** 0 = unlimited. */
+  max_attempts: number
+  /** Scores are 0–1; null until something has been scored. */
+  best: number | null
+  latest: number | null
+}
+
+export interface ProgressTicket extends ProgressItem {
+  finished: number
+  /** Out of 5, never a percentage; null before a ticket is finished. */
+  average: number | null
+  recent: { at: string; score: number }[]
+  in_progress: boolean
+}
+
+export interface ProgressRated extends ProgressItem {
+  status: string
+  revisions: number
+  /** The mentor's score, out of 5. */
+  last_score: number | null
+  due_at: string | null
+  overdue: boolean
+  feedback: string | null
+  rated_at: string | null
+}
+
 export interface AttemptReport {
   history: AttemptHistoryRow[]
   latest: AttemptResult | null
@@ -285,6 +357,7 @@ export interface AttemptReport {
 const progress = (path: string) => `/api/v1/progress/${path}`
 
 export const progressApi = {
+  summary: () => request<{ courses: ProgressCourse[] }>(progress('summary/')),
   course: (versionId: number | string) =>
     request<CourseProgressPayload>(progress(`courses/${versionId}/`)),
   startActivity: (id: number) =>
@@ -295,7 +368,7 @@ export const progressApi = {
     request<{ state: ActivityState | null }>(progress(`activities/${id}/complete/`), {
       method: 'DELETE',
     }),
-  submitAttempt: (id: number, answers: number[][]) =>
+  submitAttempt: (id: number, answers: Answer[]) =>
     request<AttemptResult>(progress(`activities/${id}/attempts/`), {
       method: 'POST',
       body: JSON.stringify({ answers }),

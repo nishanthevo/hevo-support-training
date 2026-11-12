@@ -397,7 +397,9 @@ class TestIsolationAndLoad:
     ):
         for _ in range(3):
             attempt(lc, course["quiz"], WRONG)
-        with django_assert_max_num_queries(10):
+        with django_assert_max_num_queries(
+            13
+        ):  # +1 enrollment, +1 switched-off modules, +1 written quizzes awaiting marks
             assert (
                 lc.get(reverse("progress_api:course", args=[course["version"].id])).status_code
                 == 200

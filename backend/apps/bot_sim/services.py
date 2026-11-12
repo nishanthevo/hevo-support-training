@@ -159,7 +159,7 @@ def _live_session(user, activity: Activity) -> SimSession | None:
 def start(user, activity_id: int, *, now=None) -> SimSession:
     """Begin (or resume) the learner's practice ticket for this activity."""
     now = now or _now()
-    activity = progress._activity(activity_id)  # published, exists, completable
+    activity = progress._activity(activity_id, user)  # usable, exists, completable
     if activity.activity_type != "bot_sim":
         raise Conflict("This activity isn’t a practice ticket.")
     progress._assert_lesson_open(user, progress._lesson_of(activity))

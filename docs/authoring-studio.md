@@ -28,7 +28,8 @@ Create → Draft ──Submit (trainer)──▶ In review ──Publish (admin)
 - A course has **at most one open version** (draft or in review) — a database constraint.
 - Only a plain draft is editable. In-review, published and archived versions are locked (409).
 - Publishing archives the previous published version; anyone pinned to it keeps it
-  (enrollments will reference `CourseVersion`, never `Course`).
+  (enrollments reference `CourseVersion`). Publishing does **not** enroll anyone: learners
+  see a course only once enrolled (People → Enrollments), and the publish dialog says so.
 - Submit and Publish run the **publish checklist** (≥1 module with ≥1 lesson, no empty
   lessons, every activity fully configured). Drafts may hold unfinished activities
   ("Needs setup"); publishing may not.
@@ -65,8 +66,8 @@ Studio → course → **Import**: upload `.csv` or `.xlsx` (≤ 2 MB, ≤ 2,000 
 
 Recognised columns (case/spacing-insensitive; legacy names work): **Module**
 (Segment), **Lesson** (Topic), **Section** (Subtopic), Description, Minutes,
-Activity, Activity type (Reading, Video, PDF, Quiz, Workshop, External course,
-Simulation, Chat simulation), Required, Points, URL. Blank hierarchy cells repeat
+Activity, Activity type (Reading, Video, Quiz, Simulation, Chat simulation; PDF, Workshop and External
+course were retired and are rejected), Required, Points, URL. Blank hierarchy cells repeat
 the one above. The wizard shows the detected mapping, row-numbered errors and the
 resulting tree before anything is written; commit is all-or-nothing and appends to the
 open draft. The spreadsheet is never the source of truth.

@@ -11,4 +11,5 @@ export const CAN = {
   viewAudit: 'audit.view_audit',
   rateSimulations: 'manual_sim.rate_submissions',
   manageReviews: 'manual_sim.manage_reviews',
+  manageEnrollments: 'enrollment.manage_enrollments',
 } as const

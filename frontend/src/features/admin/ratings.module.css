@@ -245,3 +245,39 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+
+.answerBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.answerBox ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: var(--fs-14);
+}
+
+.answerText,
+.refText {
+  margin: 0;
+  padding: var(--sp-3);
+  white-space: pre-wrap;
+  font-size: var(--fs-14);
+  line-height: 1.5;
+  border-radius: 8px;
+}
+
+.answerText {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.refText {
+  color: var(--text-body);
+  border: 1px dashed var(--border);
+}

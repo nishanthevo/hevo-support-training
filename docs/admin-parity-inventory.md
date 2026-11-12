@@ -102,6 +102,7 @@ Last updated: **All planned phases implemented and tested** — foundation + lea
 | `RubricScore` | read-only list | shown inside the thread and to the learner (score, label, feedback) | Replaced | `test_manual_sim_api.py` | |
 | `SubmissionFile` | read-only list | opened from the thread / the learner's own screen, authorised on every request | Replaced | `test_manual_sim_files.py` | No antivirus scan; the orphan sweep is a command (`purge_orphan_attachments`). |
 | `MentorAssignment` | read-only list | **none yet** — written only through `assign_mentor()`, whose caller will be the enrolment workflow | Intentional difference (needs sign-off) | `test_manual_sim_services.py` | Until enrolment exists nothing writes it, so all work uses the shared pool. |
+| `QuizReview`, `QuizReviewMark` | not registered | `manual_sim.rate_submissions` / `manage_reviews` | **Ratings** queue (both kinds listed), the quiz marking page (marks per written question, comments, claim / release / reassign); results screens show "Awaiting review" | Replaced (no Django Admin equivalent existed) | `test_quiz_written.py`, `test_quiz_written_unit.py`, `test_quiz_written_move.py`, `test_enrollment_concurrency.py` (Postgres), `quizReview.test.tsx`, `quizWritten.test.tsx`, browser-verified | Whole-number marks only; no rater draft; attempt-based reports ignore a waiting attempt until it is marked; the export lists it as "Awaiting review". |
 | Rating permissions | the two permissions on the role matrix | **Admin → Roles** shows *Rate simulations* and *Manage simulation reviews* (Admin keeps the latter) | Replaced | `test_manual_sim_config.py`, `test_console_roles.py` | |
 
 ## audit (new)
@@ -112,6 +113,15 @@ Last updated: **All planned phases implemented and tested** — foundation + lea
 | Written by every console mutation: reset attempts, results export, user create/update/deactivate/reactivate/set password/unlock/roles, role permissions (never secrets) | Replaced (`test_console_*`) |
 | Viewer (`audit.view_audit`, admin only) with search and action filter | Replaced (`test_console_audit.py`, `admin.test.tsx`) |
 
+## enrollment
+
+| Model | Django Admin today | Permission | Console replacement | Status | Tests | Gaps |
+|---|---|---|---|---|---|---|
+| `Program`, `ProgramCourse` | not registered (the app is new) | `enrollment.manage_enrollments` | **Programs** (create/edit with ordered courses and dates, archive/restore, enroll missing) | Replaced (no Django Admin equivalent existed) | `test_enrollment_console.py::TestPrograms`, `enrollment.test.tsx`, browser-verified | Programs carry no weights, pass marks or certificates (8b). |
+| `Enrollment` | not registered | `enrollment.manage_enrollments` | **Enrollments** (list/filter, enroll people, enroll from a list with preview, withdraw, enroll again, change mentor, move to newest version with preview) | Replaced | `test_enrollment_services.py`, `test_enrollment_console.py`, `test_enrollment_migration.py`, `test_enrollment_concurrency.py` (Postgres), `enrollment.test.tsx`, browser-verified | Enrollments are never deleted, only withdrawn (history). No bulk "move everyone on version N". Not shown on the learner's page yet. |
+| `ModuleExclusion` | not registered | `enrollment.manage_enrollments` | **Modules** on an Enrollments row, and a module checklist when enrolling (one learner, or one choice for a whole pasted list); new modules are offered with a toggle in *Move to newest* | Replaced (no Django Admin equivalent existed) | `test_enrollment_modules.py`, `test_enrollment_modules_console.py`, `test_enrollment_modules_migration.py`, `test_enrollment_concurrency.py` (Postgres), `enrollment.test.tsx`, browser-verified | Per enrollment only: no Program-level defaults, no per-lesson choice. Attempt-based reports still include attempts from a module later switched off. |
+| `VersionMove` | not registered | — | Written by *Move to newest*; visible through the audit log (`enrollments.migrate`) | Replaced (audit only) | `test_enrollment_migration.py` | No dedicated history screen. |
+
 ## Capabilities introduced
 
 | Action | Granted to | Used for |
@@ -120,6 +130,7 @@ Last updated: **All planned phases implemented and tested** — foundation + lea
 | `progress.manage_attempts` | trainer, admin | Reset a learner's quiz attempts |
 | `audit.view_audit` | admin | Audit log viewer |
 | `accounts.manage_users` / `accounts.manage_roles` | admin (existing) | Users & Roles screens |
+| `enrollment.manage_enrollments` | trainer, admin (admin-locked) | Enrollments and Programs screens |
 
 ## Retirement checklist (all must be ticked, then owner sign-off)
 

@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
-from . import services, watching
+from . import services, summary, watching
 
 
 class ProgressView(APIView):
@@ -24,6 +24,13 @@ class ProgressView(APIView):
         if isinstance(exc, services.ProgressError):
             return Response({"detail": exc.message}, status=exc.status_code)
         return super().handle_exception(exc)
+
+
+class SummaryView(ProgressView):
+    """GET /api/v1/progress/summary/ — the signed-in learner's own report across their courses."""
+
+    def get(self, request: Request) -> Response:
+        return Response(summary.learner_summary(request.user))
 
 
 class CourseProgressView(ProgressView):

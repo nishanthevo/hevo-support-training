@@ -103,7 +103,10 @@ class TestWhatIsLocked:
     def test_the_payload_is_a_fixed_number_of_queries(
         self, lc, world, django_assert_max_num_queries
     ):
-        with django_assert_max_num_queries(10):
+        lc.get(reverse("progress_api:course", args=[world["version"].id]))  # enrolls (see conftest)
+        with django_assert_max_num_queries(
+            13
+        ):  # +1 enrollment, +1 switched-off modules, +1 written quizzes awaiting marks
             assert (
                 lc.get(reverse("progress_api:course", args=[world["version"].id])).status_code
                 == 200

@@ -13,12 +13,15 @@ from collections import defaultdict
 from typing import Any
 
 from django.contrib.auth import get_user_model
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, OuterRef, Q
 from django.db.models.functions import Lower
 
-from apps.activities import video
+from apps.activities import quiz, video
 from apps.activities.registry import ACTIVITY_TYPES, is_completable
 from apps.catalog.models import Activity, ContentNode, CourseVersion
+from apps.enrollment import access
+from apps.enrollment.models import Enrollment, ModuleExclusion
+from apps.manual_sim.models import QuizReview
 
 from . import watching
 from .models import ActivityAttempt, ActivityProgress, LessonCompletion, VideoWatch
@@ -42,10 +45,19 @@ def display_name(user) -> str:
     return full or user.email or user.username
 
 
+def _live_versions() -> Q:
+    """The versions that have results to see: published ones, and any that someone is still
+    enrolled on (a superseded version stays live for as long as a learner is on it)."""
+    return Q(state=CourseVersion.State.PUBLISHED) | (
+        Q(state=CourseVersion.State.ARCHIVED)
+        & Q(pk__in=Enrollment.objects.filter(state=Enrollment.State.ACTIVE).values("version"))
+    )
+
+
 def course_options() -> list[dict[str, Any]]:
-    """Courses that have a published version (the ones with results to see)."""
+    """Courses with results to see: a published version, or learners still enrolled on one."""
     versions = (
-        CourseVersion.objects.filter(state=CourseVersion.State.PUBLISHED)
+        CourseVersion.objects.filter(_live_versions(), root_node__isnull=False)
         .select_related("root_node", "course")
         .order_by("course_id", "-version")
     )
@@ -62,10 +74,11 @@ def course_options() -> list[dict[str, Any]]:
 
 
 def learners_queryset(search: str = "", course_id: int | None = None, ordering: str = "name"):
-    """Learners = people holding the learner role, plus anyone who has done
-    something (so a trainer who tried a quiz still shows up)."""
+    """Learners = people holding the learner role, anyone enrolled on a course, plus anyone
+    who has done something (so a trainer who tried a quiz still shows up)."""
     active = (
         Q(role_assignments__role__name="learner")
+        | Q(enrollments__state=Enrollment.State.ACTIVE)
         | Q(activity_progress__isnull=False)
         | Q(lesson_completions__isnull=False)
         | Q(activity_attempts__isnull=False)
@@ -81,20 +94,34 @@ def learners_queryset(search: str = "", course_id: int | None = None, ordering: 
             | Q(employee_id__icontains=search)
         )
     if course_id is not None:
-        started = Q(
-            pk__in=ActivityProgress.objects.filter(
-                activity__content_node__course_version__course_id=course_id
-            ).values("user")
-        ) | Q(
-            pk__in=LessonCompletion.objects.filter(
-                node__course_version__course_id=course_id
-            ).values("user")
+        started = (
+            Q(
+                pk__in=Enrollment.objects.filter(
+                    course_id=course_id, state=Enrollment.State.ACTIVE
+                ).values("user")
+            )
+            | Q(
+                pk__in=ActivityProgress.objects.filter(
+                    activity__content_node__course_version__course_id=course_id
+                ).values("user")
+            )
+            | Q(
+                pk__in=LessonCompletion.objects.filter(
+                    node__course_version__course_id=course_id
+                ).values("user")
+            )
         )
         qs = qs.filter(started)
     qs = qs.annotate(
         lessons_completed=Count(
             "lesson_completions",
             filter=Q(lesson_completions__provisional=False)
+            # A lesson in a module switched off for them is not part of their course.
+            & ~Q(
+                lesson_completions__node__parent__in=ModuleExclusion.objects.filter(
+                    enrollment__user=OuterRef("pk")
+                ).values("node")
+            )
             & (
                 Q(lesson_completions__node__course_version__course_id=course_id)
                 if course_id is not None
@@ -172,17 +199,21 @@ def _course_title(version: CourseVersion) -> str:
 
 
 def attempt_rows(user, activity: Activity) -> list[dict[str, Any]]:
-    return [
-        {
-            "number": a.number,
-            "score": a.score,
-            "correct": sum(a.details),
-            "total": len(a.details),
-            "passed": a.passed,
-            "submitted_at": a.submitted_at.isoformat(),
-        }
-        for a in ActivityAttempt.objects.filter(user=user, activity=activity).order_by("number")
-    ]
+    rows = []
+    for a in ActivityAttempt.objects.filter(user=user, activity=activity).order_by("number"):
+        # Points, not questions, once a quiz has written ones (a bool is one point).
+        earned, possible = quiz.tally(a.details)
+        rows.append(
+            {
+                "number": a.number,
+                "score": a.score,
+                "correct": earned,
+                "total": possible,
+                "passed": a.passed,
+                "submitted_at": a.submitted_at.isoformat(),
+            }
+        )
+    return rows
 
 
 def sim_rows(user) -> dict[int, dict[str, Any]]:
@@ -287,23 +318,33 @@ def learner_detail(user) -> dict[str, Any]:
         )
     )
     watches = {w.activity_id: w for w in VideoWatch.objects.filter(user=user)}
+    # Quiz attempts whose written answers are waiting for marks.
+    waiting_marks = set(
+        QuizReview.objects.filter(user=user, state=QuizReview.State.SUBMITTED).values_list(
+            "activity_id", flat=True
+        )
+    )
     sims = sim_rows(user)
     rated = rated_rows(user)
     courses = []
     for version in versions.order_by("course_id", "-version"):
-        lessons_total = ContentNode.objects.filter(
-            course_version=version, kind=ContentNode.Kind.TOPIC
-        ).count()
-        lessons_done = ContentNode.objects.filter(
-            course_version=version, kind=ContentNode.Kind.TOPIC, pk__in=done_lessons
-        ).count()
+        # Modules a trainer switched off for this learner are not part of their course: they
+        # don't count towards the totals and aren't listed (what they did there is kept).
+        off = access.disabled_module_ids(user, version)
+        lessons = ContentNode.objects.filter(course_version=version, kind=ContentNode.Kind.TOPIC)
+        if off:
+            lessons = lessons.exclude(parent_id__in=off)
+        lessons_total = lessons.count()
+        lessons_done = lessons.filter(pk__in=done_lessons).count()
         activities = []
         for activity in (
             Activity.objects.filter(content_node__course_version=version)
-            .select_related("content_node__parent")
+            .select_related("content_node__parent__parent")
             .order_by("content_node__order", "order", "id")
         ):
             if not is_completable(activity.activity_type, activity.config):
+                continue
+            if off and access.module_id_of(activity.content_node) in off:
                 continue
             row = progress_by_activity.get(activity.id)
             scored = activity.activity_type in SCORED_TYPES
@@ -317,6 +358,7 @@ def learner_detail(user) -> dict[str, Any]:
                     "required": activity.is_required,
                     "state": row.state if row else "not_started",
                     "scored": scored,
+                    "awaiting_review": activity.id in waiting_marks,
                     "best_score": max((a["score"] for a in attempts), default=None),
                     "attempts": attempts,
                     "max_attempts": activity.max_attempts,
@@ -348,11 +390,11 @@ def learner_detail(user) -> dict[str, Any]:
 
 
 def quiz_rows(course_id: int | None = None) -> list[dict[str, Any]]:
-    """Every scored activity in a published version, with how learners did."""
+    """Every scored activity in a live version (see `_live_versions`), with how learners did."""
     activities = (
         Activity.objects.filter(
             activity_type__in=SCORED_TYPES,
-            content_node__course_version__state=CourseVersion.State.PUBLISHED,
+            content_node__course_version__in=CourseVersion.objects.filter(_live_versions()),
         )
         .select_related(
             "content_node__parent",
@@ -375,6 +417,11 @@ def quiz_rows(course_id: int | None = None) -> list[dict[str, Any]]:
         "activity_id", "state"
     ):
         states[activity_id][state] += 1
+    waiting: dict[int, int] = defaultdict(int)
+    for activity_id in QuizReview.objects.filter(
+        activity_id__in=ids, state=QuizReview.State.SUBMITTED
+    ).values_list("activity_id", flat=True):
+        waiting[activity_id] += 1
     rows = []
     for a in found:
         scores = list(best[a.id].values())
@@ -392,6 +439,7 @@ def quiz_rows(course_id: int | None = None) -> list[dict[str, Any]]:
                 "passed": states[a.id]["completed"],
                 "not_passed": states[a.id]["exhausted"],
                 "in_progress": states[a.id]["started"],
+                "awaiting_review": waiting[a.id],
                 "average_best_score": sum(scores) / len(scores) if scores else None,
             }
         )
@@ -411,6 +459,13 @@ def quiz_detail(activity: Activity) -> dict[str, Any]:
         attempts_by_user[a.user_id].append(a)
     users = {a[0].user_id: a[0].user for a in attempts_by_user.values()}
     users.update({uid: p.user for uid, p in progress.items()})
+    waiting_users = {
+        r.user_id: r
+        for r in QuizReview.objects.filter(
+            activity=activity, state=QuizReview.State.SUBMITTED
+        ).select_related("user")
+    }
+    users.update({uid: r.user for uid, r in waiting_users.items()})
     for uid, user in users.items():
         tries = attempts_by_user.get(uid, [])
         rows.append(
@@ -419,7 +474,8 @@ def quiz_detail(activity: Activity) -> dict[str, Any]:
                 "name": display_name(user),
                 "email": user.email,
                 "state": progress[uid].state if uid in progress else "not_started",
-                "attempts": len(tries),
+                "awaiting_review": uid in waiting_users,
+                "attempts": len(tries) + (1 if uid in waiting_users else 0),
                 "best_score": max((t.score for t in tries), default=None),
                 "last_score": tries[-1].score if tries else None,
                 "last_attempt_at": tries[-1].submitted_at.isoformat() if tries else None,
@@ -468,4 +524,29 @@ def export_rows(course_id: int | None = None):
             a.submitted_at.isoformat(),
             {"bot_sim": "Practice ticket", "manual_sim": "Mentor-rated"}.get(kind, "Quiz"),
             round(a.score * 5, 2) if scored_out_of_five else "",
+        ]
+    # Quiz attempts whose written answers are still waiting for marks have no score yet; say so
+    # rather than listing them as "Not passed".
+    waiting = QuizReview.objects.filter(state=QuizReview.State.SUBMITTED).select_related(
+        "user",
+        "activity__content_node__course_version__root_node",
+        "activity__content_node__course_version__course",
+    )
+    if course_id is not None:
+        waiting = waiting.filter(activity__content_node__course_version__course_id=course_id)
+    for r in waiting.order_by("submitted_at", "id"):
+        version = r.activity.content_node.course_version
+        yield [
+            r.user.email,
+            display_name(r.user),
+            r.user.employee_id or "",
+            _course_title(version),
+            version.version,
+            r.activity.title,
+            r.attempt_no,
+            "",
+            "Awaiting review",
+            r.submitted_at.isoformat(),
+            "Quiz",
+            "",
         ]

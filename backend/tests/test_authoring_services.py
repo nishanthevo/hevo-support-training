@@ -98,7 +98,7 @@ class TestUpdateAndDelete:
         m2 = services.add_node(root, title="Two")
         lesson = services.add_node(m1, title="L")
         section = services.add_node(lesson, title="S")
-        Activity.objects.create(content_node=section, activity_type="workshop", title="Do it")
+        Activity.objects.create(content_node=section, activity_type="reading", title="Do it")
 
         assert services.node_impact(m1) == {"lessons": 1, "sections": 1, "activities": 1}
 

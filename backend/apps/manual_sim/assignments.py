@@ -21,7 +21,7 @@ from apps.catalog.models import Activity, Course
 
 from . import eligibility
 from .errors import BadInput
-from .models import MentorAssignment, SimSubmission
+from .models import MentorAssignment, QuizReview, SimSubmission
 
 
 def is_eligible_mentor(mentor, learner) -> bool:
@@ -97,7 +97,18 @@ def reroute_open(learner, course: Course) -> int:
         )
         .exclude(routing=SimSubmission.Routing.ADMIN)
     )
-    for sub in pending:
+    # Written quiz answers waiting for marks are routed by the very same rules.
+    waiting_quizzes = (
+        QuizReview.objects.select_for_update()
+        .filter(
+            user=learner,
+            activity__content_node__course_version__course=course,
+            state=QuizReview.State.SUBMITTED,
+        )
+        .exclude(routing=SimSubmission.Routing.ADMIN)
+    )
+    waiting: list[SimSubmission | QuizReview] = [*pending, *waiting_quizzes]
+    for sub in waiting:
         new_id = mentor.pk if mentor is not None else None
         if sub.assigned_mentor_id == new_id and sub.routing == routing:
             continue
